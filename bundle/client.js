@@ -868,6 +868,30 @@ window.__ModuleLoader__.load({
 
     function ReviewPlayer({ record, data }) {
       const event = data ? data.event : null
+      const [annotations, setAnnotations] = useState((data && data.annotations) || [])
+      useEffect(() => { setAnnotations((data && data.annotations) || []) }, [data])
+      const addAnnotation = () => {
+        const text = window.prompt('标注内容（当前时间点 ' + fmt(time) + '）')
+        if (!text) return
+        fetch('/event-video/annotations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, action: 'add', annotation: { t0: time, text } }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) setAnnotations(value.annotations)
+          else window.alert(value.error || '标注失败')
+        }).catch(() => window.alert('标注失败'))
+      }
+      const removeAnnotation = (id) => {
+        fetch('/event-video/annotations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, action: 'delete', id }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) setAnnotations(value.annotations)
+          else window.alert(value.error || '删除失败')
+        }).catch(() => window.alert('删除失败'))
+      }
       const review = data ? data.review : null
       const chapters = event && Array.isArray(event.chapters) ? event.chapters : []
       const units = event && Array.isArray(event.units) ? event.units : []
@@ -1001,6 +1025,7 @@ window.__ModuleLoader__.load({
             window.open('/event-video/frame?out=' + encodeURIComponent(out) + '&t=' + Math.round(time) + '&format=image', '_blank')
           },
         }, '看帧'),
+        h('button', { type: 'button', className: 'dsev-btn', onClick: addAnnotation }, '标注'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {
@@ -1063,6 +1088,14 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsev-video-wrap' }, video),
           seekBar,
           controls,
+          h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
+            h('div', { className: 'dsev-card-title' }, `标注（${annotations.length}）`),
+            annotations.length === 0
+              ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
+              : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
+                h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
+                h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
+                h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))),
           h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
             h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
             chapterRows)),

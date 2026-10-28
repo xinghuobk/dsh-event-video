@@ -19,6 +19,7 @@ let PYTHON = PYTHON_DEFAULT
 let DEFAULT_WHISPER = ''
 let CAMERA_DEVICE = 'video=Default'
 let ROOTS = []
+let ANNOTATIONS_ENABLED = true
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -38,6 +39,7 @@ function configure(config = {}) {
   PYTHON = config.pythonPath || process.env.DSH_EVENT_VIDEO_PYTHON || PYTHON_DEFAULT
   DEFAULT_WHISPER = config.whisperModel || process.env.DSH_EVENT_VIDEO_WHISPER || ''
   CAMERA_DEVICE = config.cameraDevice || process.env.DSH_EVENT_VIDEO_CAMERA_DEVICE || 'video=Default'
+  ANNOTATIONS_ENABLED = config.enableAnnotations !== false && process.env.DSH_EVENT_VIDEO_ANNOTATIONS !== '0'
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -275,6 +277,94 @@ async function listRecords() {
   return rows.sort((a, b) => b.mtime - a.mtime)
 }
 
+function frameNameFor(event, t) {
+  const fps = Number(event.fps || 1)
+  const start = Number(event.start || 0)
+  return `f_${String(Math.max(1, Math.round((Number(t) - start) * fps) + 1)).padStart(6, '0')}.jpg`
+}
+
+function annotationsPath(out) {
+  return join(out, 'annotations.json')
+}
+
+async function readAnnotations(out) {
+  if (!insideRoots(out)) throw new Error('path outside allowed roots')
+  try {
+    const data = JSON.parse(await fs.readFile(annotationsPath(out), 'utf8'))
+    return { version: 1, annotations: Array.isArray(data.annotations) ? data.annotations : [] }
+  } catch {
+    return { version: 1, annotations: [] }
+  }
+}
+
+async function writeAnnotations(out, data) {
+  const target = annotationsPath(out)
+  const tmp = `${target}.tmp-${randomUUID().slice(0, 8)}`
+  await fs.writeFile(tmp, JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), annotations: data.annotations }, null, 1))
+  await fs.rename(tmp, target)
+}
+
+async function eventFor(out) {
+  return JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
+}
+
+function normalizeAnnotation(input) {
+  const t0 = Number(input.t0)
+  if (!Number.isFinite(t0) || t0 < 0) throw new Error('t0 must be a non-negative number of seconds')
+  const t1 = input.t1 === undefined || input.t1 === null || input.t1 === '' ? t0 : Number(input.t1)
+  if (!Number.isFinite(t1)) throw new Error('t1 must be a number of seconds')
+  const text = String(input.text ?? '').trim()
+  if (!text) throw new Error('text is required')
+  if (text.length > 500) throw new Error('text is limited to 500 characters')
+  const kind = input.kind === 'label' ? 'label' : 'note'
+  return {
+    id: randomUUID(),
+    kind,
+    t0,
+    t1: Math.max(t0, t1),
+    text,
+    author: String(input.author || 'user').slice(0, 40),
+    createdAt: new Date().toISOString(),
+  }
+}
+
+async function addAnnotation(out, input) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const event = await eventFor(out)
+  const data = await readAnnotations(out)
+  const annotation = normalizeAnnotation(input)
+  annotation.frame = frameNameFor(event, annotation.t0)
+  data.annotations.push(annotation)
+  await writeAnnotations(out, data)
+  return { ok: true, annotation, annotations: data.annotations }
+}
+
+async function updateAnnotation(out, id, patch) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const data = await readAnnotations(out)
+  const index = data.annotations.findIndex((item) => item.id === id)
+  if (index < 0) throw new Error('annotation not found')
+  const current = data.annotations[index]
+  const merged = normalizeAnnotation({ ...current, ...patch, t0: patch.t0 ?? current.t0, t1: patch.t1 ?? current.t1 })
+  merged.id = current.id
+  merged.createdAt = current.createdAt
+  merged.updatedAt = new Date().toISOString()
+  merged.frame = frameNameFor(await eventFor(out), merged.t0)
+  data.annotations[index] = merged
+  await writeAnnotations(out, data)
+  return { ok: true, annotation: merged, annotations: data.annotations }
+}
+
+async function deleteAnnotation(out, id) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const data = await readAnnotations(out)
+  const before = data.annotations.length
+  data.annotations = data.annotations.filter((item) => item.id !== id)
+  if (data.annotations.length === before) throw new Error('annotation not found')
+  await writeAnnotations(out, data)
+  return { ok: true, annotations: data.annotations }
+}
+
 async function readRecord(out) {
   if (!insideRoots(out)) throw new Error('path outside allowed roots')
   const event = JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
@@ -284,7 +374,13 @@ async function readRecord(out) {
   } catch {
     /* optional */
   }
-  return { event, review }
+  let annotations = []
+  try {
+    annotations = (await readAnnotations(out)).annotations
+  } catch {
+    /* optional */
+  }
+  return { event, review, annotations }
 }
 
 async function serveMedia(req, res, url) {
@@ -799,7 +895,7 @@ function recordFromEvent(event, out, title) {
   }
 }
 
-function recordMarkdown(record, event) {
+function recordMarkdown(record, event, annotations = []) {
   const chapters = event.chapters || []
   const units = event.units || []
   const flags = record.flags
@@ -815,6 +911,12 @@ function recordMarkdown(record, event) {
   ]
   if (flags.length === 0) lines.push('无。')
   else for (const flag of flags) lines.push(`- [${flag.level}] ${flag.code}：${flag.message}`)
+  if (annotations.length > 0) {
+    lines.push('', '## 标注', '', '| 时间 | 类型 | 内容 | 作者 |', '|---|---|---|---|')
+    for (const annotation of annotations) {
+      lines.push(`| ${fmtClock(annotation.t0)}–${fmtClock(annotation.t1)} | ${annotation.kind === 'label' ? '标签' : '备注'} | ${String(annotation.text).replace(/\|/g, '／')} | ${annotation.author || '—'} |`)
+    }
+  }
   lines.push('', '## 章节', '', '| 时间 | 依据 | URL | 停留 | 注意力 |', '|---|---|---|---|---|')
   for (const chapter of chapters) {
     lines.push(`| ${fmtClock(chapter.t0)}–${fmtClock(chapter.t1)} | ${chapter.reason === 'url' ? '页面切换' : '话题'} | ${chapter.url || '—'} | ${Math.round(chapter.dwell)}s | ${Math.round(chapter.attention)} |`)
@@ -866,6 +968,12 @@ async function exportRecord(out, formats = ['md', 'csv', 'json', 'docx', 'xlsx']
     /* optional */
   }
   const record = recordFromEvent(event, out, title)
+  let annotations = []
+  try {
+    annotations = (await readAnnotations(out)).annotations
+  } catch {
+    /* optional sidecar */
+  }
   const dir = join(HOME, 'exports', `${title.replace(/[\\/:*?"<>|]/g, '_')}-${Date.now()}`)
   await fs.mkdir(dir, { recursive: true })
   const files = []
@@ -875,10 +983,15 @@ async function exportRecord(out, formats = ['md', 'csv', 'json', 'docx', 'xlsx']
     const target = join(dir, 'event.json')
     await fs.writeFile(target, JSON.stringify(event, null, 1))
     files.push(target)
+    if (annotations.length > 0) {
+      const sidecar = join(dir, 'annotations.json')
+      await fs.writeFile(sidecar, JSON.stringify({ version: 1, annotations }, null, 1))
+      files.push(sidecar)
+    }
   }
   if (wanted.has('md')) {
     const target = join(dir, 'analysis.md')
-    await fs.writeFile(target, recordMarkdown(record, event))
+    await fs.writeFile(target, recordMarkdown(record, event, annotations))
     files.push(target)
   }
   if (wanted.has('csv')) {
@@ -1243,6 +1356,50 @@ async function askVideoLibrary(question, limit = 6) {
   }
 }
 
+const annotateTool = {
+  name: 'annotate_video_record',
+  description: 'Add a timestamped annotation (note or chapter label) to an event record. Stored in the record\'s annotations.json sidecar; event.json is never modified. Returns the new annotation with its frame anchor.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 't0', 'text'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      t0: { type: 'number', description: 'Start time in seconds.' },
+      t1: { type: 'number', description: 'Optional end time in seconds.' },
+      text: { type: 'string', description: 'Annotation text (max 500 chars).' },
+      kind: { type: 'string', enum: ['note', 'label'], description: 'note or chapter label (default note).' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    return addAnnotation(args.out, { ...args, author: 'agent' })
+  },
+}
+
+const listAnnotationsTool = {
+  name: 'list_video_annotations',
+  description: 'List the timestamped annotations written for an event record (annotations.json sidecar).',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out'],
+    properties: { out: { type: 'string', description: 'Event record output directory.' } },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    return readAnnotations(args.out)
+  },
+}
+
 const searchLibraryTool = {
   name: 'search_video_library',
   description: 'Search every analyzed video in the library for timestamped evidence (speech units and on-screen labels). Returns ranked hits with record title, time, frame path and quote. Use ask_video_library when you need an answer with citations.',
@@ -1499,6 +1656,38 @@ function handler(req, res) {
       sendJson(res, 200, await askVideoLibrary(question, limit))
       return
     }
+    if (route === '/event-video/annotations') {
+      if (!ANNOTATIONS_ENABLED) {
+        sendJson(res, 403, { error: 'annotations are disabled' })
+        return
+      }
+      if (req.method === 'GET') {
+        const out = url.searchParams.get('out') || ''
+        try {
+          sendJson(res, 200, await readAnnotations(out))
+        } catch (error) {
+          sendJson(res, 400, { error: String(error.message) })
+        }
+        return
+      }
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        try {
+          if ((body.action || 'add') === 'add') {
+            sendJson(res, 200, await addAnnotation(body.out, body.annotation || body))
+          } else if (body.action === 'update') {
+            sendJson(res, 200, await updateAnnotation(body.out, body.id, body.patch || {}))
+          } else if (body.action === 'delete') {
+            sendJson(res, 200, await deleteAnnotation(body.out, body.id))
+          } else {
+            sendJson(res, 400, { error: 'unknown action' })
+          }
+        } catch (error) {
+          sendJson(res, 400, { error: String(error.message) })
+        }
+        return
+      }
+    }
     sendJson(res, 404, { error: 'not found' })
   }
   run().catch((error) => sendJson(res, 500, { error: String(error?.message ?? error) }))
@@ -1717,6 +1906,10 @@ export function apply(ctx, config) {
   }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
+  if (ANNOTATIONS_ENABLED) {
+    ctx.effect(() => ctx.tools.register(annotateTool), 'event-video: annotate tool')
+    ctx.effect(() => ctx.tools.register(listAnnotationsTool), 'event-video: annotations tool')
+  }
   if ((config || {}).enableSearchTool !== false && process.env.DSH_EVENT_VIDEO_SEARCH !== '0') {
     ctx.effect(() => ctx.tools.register(searchLibraryTool), 'event-video: search tool')
     ctx.effect(() => ctx.tools.register(askLibraryTool), 'event-video: ask tool')
@@ -1738,4 +1931,9 @@ export const __test = {
   searchLibrary,
   askVideoLibrary,
   buildSearchIndex,
+  readAnnotations,
+  addAnnotation,
+  updateAnnotation,
+  deleteAnnotation,
+  recordMarkdown,
 }
