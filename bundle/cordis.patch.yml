@@ -1,0 +1,3 @@
+- insert:
+    - id: event-video-card
+      name: '@local/dsh-event-video-card'

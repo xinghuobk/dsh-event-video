@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "features": [
+    "pixdiff",
+    "dy",
+    "dx",
+    "text_overlap",
+    "text_delta",
+    "duration"
+  ],
+  "categories": [
+    {
+      "id": "no_change",
+      "mode": [
+        "screen"
+      ],
+      "desc": "画面实质未变（分割噪声/压缩抖动）",
+      "rules": [
+        {
+          "feature": "pixdiff",
+          "op": "<",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": "scroll_vertical",
+      "mode": [
+        "screen"
+      ],
+      "desc": "纵向滚动",
+      "rules": [
+        {
+          "feature": "abs_dy",
+          "op": ">=",
+          "value": 6
+        }
+      ]
+    },
+    {
+      "id": "scroll_horizontal",
+      "mode": [
+        "screen"
+      ],
+      "desc": "横向滚动",
+      "rules": [
+        {
+          "feature": "abs_dx",
+          "op": ">=",
+          "value": 8
+        },
+        {
+          "feature": "dx_gt_dy",
+          "op": ">",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "page_nav",
+      "mode": [
+        "screen"
+      ],
+      "desc": "整页切换（文本大量更换、无位移）",
+      "rules": [
+        {
+          "feature": "pixdiff",
+          "op": ">=",
+          "value": 15
+        },
+        {
+          "feature": "text_overlap",
+          "op": "<",
+          "value": 0.6
+        },
+        {
+          "feature": "max_shift",
+          "op": "<",
+          "value": 6
+        }
+      ]
+    },
+    {
+      "id": "partial_change",
+      "mode": [
+        "screen"
+      ],
+      "desc": "局部变化：面板/弹层/悬停态/视频暂停",
+      "rules": [
+        {
+          "feature": "pixdiff",
+          "op": ">=",
+          "value": 6
+        },
+        {
+          "feature": "max_shift",
+          "op": "<",
+          "value": 6
+        }
+      ]
+    },
+    {
+      "id": "animation",
+      "mode": [
+        "screen"
+      ],
+      "desc": "动画/视频播放（文本基本不变）",
+      "rules": [
+        {
+          "feature": "text_overlap",
+          "op": ">=",
+          "value": 0.6
+        },
+        {
+          "feature": "pixdiff",
+          "op": ">=",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "id": "small_animation",
+      "mode": [
+        "screen"
+      ],
+      "desc": "小范围动画（文本基本不变、画面轻微变化）",
+      "rules": [
+        {
+          "feature": "text_overlap",
+          "op": ">=",
+          "value": 0.6
+        },
+        {
+          "feature": "pixdiff",
+          "op": ">=",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "id": "tiny_ui",
+      "mode": [
+        "screen"
+      ],
+      "desc": "微交互：极小的画面变化",
+      "rules": [
+        {
+          "feature": "pixdiff",
+          "op": "<",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "id": "shot_change",
+      "mode": [
+        "action"
+      ],
+      "desc": "镜头切换",
+      "rules": [
+        {
+          "feature": "pixdiff",
+          "op": ">",
+          "value": 12
+        },
+        {
+          "feature": "max_shift",
+          "op": "<",
+          "value": 8
+        }
+      ]
+    },
+    {
+      "id": "camera_move",
+      "mode": [
+        "action"
+      ],
+      "desc": "镜头/机位移动",
+      "rules": [
+        {
+          "feature": "max_shift",
+          "op": ">=",
+          "value": 8
+        }
+      ]
+    },
+    {
+      "id": "steady_motion",
+      "mode": [
+        "action"
+      ],
+      "desc": "稳定小动作",
+      "rules": [
+        {
+          "feature": "pixdiff",
+          "op": "<",
+          "value": 12
+        }
+      ]
+    }
+  ],
+  "learned": {
+    "screen": {
+      "clusters": [],
+      "labels": {},
+      "samples": 0,
+      "scaler": null
+    },
+    "action": {
+      "clusters": [],
+      "labels": {},
+      "samples": 0,
+      "scaler": null
+    }
+  }
+}

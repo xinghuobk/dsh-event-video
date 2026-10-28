@@ -1,0 +1,25 @@
+# runtime data
+video-events/
+camera/
+*.mp4
+*.jpg
+*.jpeg
+*.png
+!icon.svg
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# node
+node_modules/
+
+# misc
+*.log
+.DS_Store
+Thumbs.db
