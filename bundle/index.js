@@ -680,6 +680,203 @@ async function waitCameraEvent(kinds, timeoutMs) {
   return { event: null, state: await readCameraState(), timedOut: true }
 }
 
+function fmtClock(seconds) {
+  const s = Math.max(0, Math.round(seconds || 0))
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+function csvEscape(value) {
+  const text = String(value ?? '')
+  return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text
+}
+
+function recordFromEvent(event, out, title) {
+  const states = event.states || []
+  const reviews = event.review || reviewEventRecord(event)
+  const top = states.reduce((best, state) => {
+    const emphasis = state.attention ? state.attention.emphasis : 0
+    return emphasis > (best ? best.emphasis : -1)
+      ? { t0: state.t0, t1: state.t1, emphasis, url: state.url_hint ?? null }
+      : best
+  }, null)
+  return {
+    title: title || out.split(/[\\/]/).pop(),
+    out,
+    video: event.video ?? null,
+    mode: event.mode ?? '',
+    duration: Number(event.span_s || 0),
+    states: states.length,
+    chapters: (event.chapters || []).length,
+    units: (event.units || []).length,
+    gaps: (event.gaps || []).length,
+    gates: Boolean(event.gates && event.gates.all_ok),
+    flags: Array.isArray(reviews.flags) ? reviews.flags : [],
+    top,
+  }
+}
+
+function recordMarkdown(record, event) {
+  const chapters = event.chapters || []
+  const units = event.units || []
+  const flags = record.flags
+  const lines = [
+    `# ${record.title}`,
+    '',
+    `- 来源视频：${record.video || '—'}`,
+    `- 模式：${record.mode} · 时长：${fmtClock(record.duration)} · 状态：${record.states} · 章节：${record.chapters} · 语元：${record.units} · 语音缺口：${record.gaps}`,
+    `- 校验：${record.gates ? 'PASS' : 'FAIL'}`,
+    '',
+    '## 审阅标记',
+    '',
+  ]
+  if (flags.length === 0) lines.push('无。')
+  else for (const flag of flags) lines.push(`- [${flag.level}] ${flag.code}：${flag.message}`)
+  lines.push('', '## 章节', '', '| 时间 | 依据 | URL | 停留 | 注意力 |', '|---|---|---|---|---|')
+  for (const chapter of chapters) {
+    lines.push(`| ${fmtClock(chapter.t0)}–${fmtClock(chapter.t1)} | ${chapter.reason === 'url' ? '页面切换' : '话题'} | ${chapter.url || '—'} | ${Math.round(chapter.dwell)}s | ${Math.round(chapter.attention)} |`)
+  }
+  lines.push('', '## 注意力最高的状态', '')
+  const topStates = [...(event.states || [])]
+    .sort((a, b) => (b.attention ? b.attention.emphasis : 0) - (a.attention ? a.attention.emphasis : 0))
+    .slice(0, 8)
+  for (const state of topStates) {
+    const attention = state.attention || {}
+    lines.push(`- ${fmtClock(state.t0)}–${fmtClock(state.t1)} · 注意力 ${Math.round(attention.emphasis || 0)} · ${state.url_hint || '无 URL'}${state.label_hi || state.label || state.label_speech ? ' · ' + String(state.label_hi || state.label || state.label_speech).slice(0, 80) : ''}`)
+  }
+  const urls = new Map()
+  for (const state of event.states || []) {
+    const key = state.url_hint || '无 URL'
+    urls.set(key, (urls.get(key) || 0) + 1)
+  }
+  lines.push('', '## URL 分布', '', '| URL | 状态数 |', '|---|---|')
+  for (const [url, count] of [...urls.entries()].sort((a, b) => b[1] - a[1])) {
+    lines.push(`| ${url} | ${count} |`)
+  }
+  const speechByGap = (event.gaps || []).slice(0, 10)
+  if (speechByGap.length > 0) {
+    lines.push('', '## 语音缺口（前 10）', '', '| 时间 | 时长 |', '|---|---|')
+    for (const gap of speechByGap) {
+      lines.push(`| ${fmtClock(gap.t0)}–${fmtClock(gap.t1)} | ${Math.round(gap.t1 - gap.t0)}s |`)
+    }
+  }
+  void units
+  return lines.join('\n')
+}
+
+function chaptersCsv(event) {
+  const header = ['start', 'end', 'start_s', 'end_s', 'reason', 'url', 'dwell_s', 'attention']
+  const rows = (event.chapters || []).map((chapter) => [
+    fmtClock(chapter.t0), fmtClock(chapter.t1), Math.round(chapter.t0), Math.round(chapter.t1),
+    chapter.reason, chapter.url || '', Math.round(chapter.dwell), Math.round(chapter.attention),
+  ])
+  return [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')
+}
+
+async function exportRecord(out, formats = ['md', 'csv', 'json']) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const event = JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
+  let title = out.split(/[\\/]/).pop()
+  try {
+    title = JSON.parse(await fs.readFile(join(out, 'review.json'), 'utf8')).title || title
+  } catch {
+    /* optional */
+  }
+  const record = recordFromEvent(event, out, title)
+  const dir = join(HOME, 'exports', `${title.replace(/[\\/:*?"<>|]/g, '_')}-${Date.now()}`)
+  await fs.mkdir(dir, { recursive: true })
+  const files = []
+  const wanted = new Set(formats)
+  if (wanted.has('json')) {
+    const target = join(dir, 'event.json')
+    await fs.writeFile(target, JSON.stringify(event, null, 1))
+    files.push(target)
+  }
+  if (wanted.has('md')) {
+    const target = join(dir, 'analysis.md')
+    await fs.writeFile(target, recordMarkdown(record, event))
+    files.push(target)
+  }
+  if (wanted.has('csv')) {
+    const target = join(dir, 'chapters.csv')
+    await fs.writeFile(target, chaptersCsv(event))
+    files.push(target)
+  }
+  return { ok: true, dir, files }
+}
+
+async function collectSummary() {
+  const records = await listRecords()
+  const per = []
+  for (const item of records) {
+    try {
+      const event = JSON.parse(await fs.readFile(join(item.out, 'event.json'), 'utf8'))
+      per.push(recordFromEvent(event, item.out, item.title || item.name || item.dir))
+    } catch {
+      /* skip unreadable record */
+    }
+  }
+  const totals = {
+    records: per.length,
+    duration: Math.round(per.reduce((sum, r) => sum + r.duration, 0)),
+    states: per.reduce((sum, r) => sum + r.states, 0),
+    chapters: per.reduce((sum, r) => sum + r.chapters, 0),
+    units: per.reduce((sum, r) => sum + r.units, 0),
+    gatesOk: per.filter((r) => r.gates).length,
+    flags: per.reduce((sum, r) => sum + r.flags.length, 0),
+  }
+  const flagsByCode = {}
+  for (const record of per) {
+    for (const flag of record.flags) {
+      flagsByCode[flag.code] = (flagsByCode[flag.code] || 0) + 1
+    }
+  }
+  const topSegments = per
+    .filter((record) => record.top)
+    .map((record) => ({ title: record.title, out: record.out, ...record.top }))
+    .sort((a, b) => b.emphasis - a.emphasis)
+    .slice(0, 10)
+  return { generatedAt: new Date().toISOString(), totals, flagsByCode, records: per, topSegments }
+}
+
+async function exportSummary() {
+  const summary = await collectSummary()
+  const dir = join(HOME, 'exports', `summary-${Date.now()}`)
+  await fs.mkdir(dir, { recursive: true })
+  const lines = [
+    '# 视频分析总览',
+    '',
+    `- 生成时间：${summary.generatedAt}`,
+    `- 记录数：${summary.totals.records} · 总时长：${fmtClock(summary.totals.duration)} · 章节：${summary.totals.chapters}`,
+    `- 状态：${summary.totals.states} · 语元：${summary.totals.units} · 校验通过：${summary.totals.gatesOk}/${summary.totals.records}`,
+    `- 审阅标记：${summary.totals.flags}`,
+    '',
+    '## 记录',
+    '',
+    '| 标题 | 时长 | 章节 | 状态 | 校验 | 审阅标记 |',
+    '|---|---|---|---|---|---|',
+  ]
+  for (const record of summary.records) {
+    lines.push(`| ${record.title} | ${fmtClock(record.duration)} | ${record.chapters} | ${record.states} | ${record.gates ? 'PASS' : 'FAIL'} | ${record.flags.length} |`)
+  }
+  lines.push('', '## 跨记录注意力最高段落', '')
+  for (const segment of summary.topSegments) {
+    lines.push(`- ${segment.title} · ${fmtClock(segment.t0)}–${fmtClock(segment.t1)} · ${Math.round(segment.emphasis)}`)
+  }
+  lines.push('', '## 审阅标记分布', '')
+  for (const [code, count] of Object.entries(summary.flagsByCode).sort((a, b) => b[1] - a[1])) {
+    lines.push(`- ${code}：${count}`)
+  }
+  const md = join(dir, 'summary.md')
+  const json = join(dir, 'summary.json')
+  await fs.writeFile(md, lines.join('\n'))
+  await fs.writeFile(json, JSON.stringify(summary, null, 1))
+  const csv = join(dir, 'records.csv')
+  const head = 'title,out,duration_s,states,chapters,units,gaps,gates,flags\n'
+  const rows = summary.records.map((r) => [r.title, r.out, Math.round(r.duration), r.states, r.chapters, r.units, r.gaps, r.gates, r.flags.length].map(csvEscape).join(','))
+  await fs.writeFile(csv, head + rows.join('\n'))
+  return { ok: true, dir, files: [md, json, csv] }
+}
+
 function handler(req, res) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`)
   const route = url.pathname
@@ -725,6 +922,27 @@ function handler(req, res) {
       }
       const event = JSON.parse(await fs.readFile(join(body.out, 'event.json'), 'utf8'))
       sendJson(res, 200, reviewEventRecord(event))
+      return
+    }
+    if (route === '/event-video/summary' && req.method === 'GET') {
+      sendJson(res, 200, await collectSummary())
+      return
+    }
+    if (route === '/event-video/export' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await exportRecord(body.out, body.formats))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/export-summary' && req.method === 'POST') {
+      try {
+        sendJson(res, 200, await exportSummary())
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
       return
     }
     if (route === '/event-video/rename' && req.method === 'POST') {
@@ -861,6 +1079,42 @@ function reviewEventRecord(event) {
   }
 }
 
+const exportTool = {
+  name: 'export_video_analysis',
+  description: 'Export the analysis of one event record: analysis.md (readable report with chapters, attention, URLs and review flags), chapters.csv, and the raw event.json. Returns the export directory and file paths. Use after building/reviewing a record when the user wants files.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      formats: { type: 'array', items: { type: 'string' }, description: 'Any of md, csv, json (default all three).' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    return exportRecord(args.out, args.formats)
+  },
+}
+
+const summaryTool = {
+  name: 'summarize_video_analyses',
+  description: 'One-shot overview of every analyzed video in the library: totals (records, duration, states, chapters, units), per-record metrics, review-flag counts by code, and the highest-attention segments across records.',
+  parameters: { type: 'object', additionalProperties: false, properties: {} },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 45000,
+  async execute() {
+    return collectSummary()
+  },
+}
+
 const reviewTool = {
   name: 'review_video_event',
   description: 'Review a built event record before reporting it: completeness gates, OCR URL anomalies (missing = / &, truncated), unlabeled states, long speech gaps, alignment outliers, chapter length anomalies. Call this immediately after build_video_event and include the flags in your answer.',
@@ -948,6 +1202,8 @@ export function apply(ctx, config) {
     handler,
   }), 'event-video: camera routes')
   ctx.effect(() => ctx.tools.register(reviewTool), 'event-video: review tool')
+  ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
+  ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
   ctx.effect(() => ctx.tools.register(cameraStateTool), 'event-video: camera_state tool')
   ctx.effect(() => ctx.tools.register(cameraWaitTool), 'event-video: camera_wait tool')
   ctx.effect(() => ctx.tools.register(cameraSnapshotTool), 'event-video: camera_snapshot tool')

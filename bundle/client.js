@@ -467,6 +467,16 @@ window.__ModuleLoader__.load({
       .dsev-cam-event-name { font-size: 12px; font-weight: 500; }
       .dsev-cam-event-meta { font-size: 11px; color: var(--dsev-text-3); }
       .dsev-cam-note { font-size: 11.5px; color: var(--dsev-text-3); margin-top: 10px; line-height: 1.6; }
+      .dsev-sum-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+      @media (max-width: 900px) { .dsev-sum-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      .dsev-sum-card { border: 0.5px solid var(--dsev-border); border-radius: 12px; padding: 12px 14px; background: var(--dsev-surface); }
+      .dsev-sum-label { font-size: 11px; color: var(--dsev-text-3); }
+      .dsev-sum-value { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+      .dsev-flag-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 0.5px solid var(--dsev-border); font-size: 12px; }
+      .dsev-flag-code { font-family: var(--dsev-mono); font-size: 11px; color: var(--dsev-accent); }
+      .dsev-flag-count { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--dsev-text-3); }
+      .dsev-sum-top { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 0.5px solid var(--dsev-border); font-size: 12px; }
+      .dsev-sum-top-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsev-text-2); }
     `
 
     function Mark({ className, size }) {
@@ -1263,6 +1273,15 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ out: record.out }),
         }).catch(() => {})
       }
+      const exportRecord = (record) => {
+        fetch('/event-video/export', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out }),
+        }).then((r) => r.json()).then((data) => {
+          setNote(data.dir ? '已导出：' + data.dir : (data.error || '导出失败'))
+        }).catch(() => setNote('导出失败'))
+      }
 
       const cards = filtered.map((r) => h('div', {
         key: r.out,
@@ -1280,6 +1299,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-tags' }, (r.tags || []).map((t) => h('span', { key: t, className: 'dsev-tag' }, t))),
         h('div', { style: { display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' } },
           h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); onOpen(r.out) } }, '打开'),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); exportRecord(r) } }, '导出'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); renameRecord(r) } }, '改名'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); deleteRecord(r) } }, '删除'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); editTags(r) } }, '标签'),
@@ -1469,6 +1489,90 @@ window.__ModuleLoader__.load({
             h('div', { className: 'dsev-cam-events' }, eventRows))))
     }
 
+    function SummaryView({ onOpen }) {
+      const [summary, setSummary] = useState(null)
+      const [toast, showToast] = useToast()
+      const load = () => {
+        fetch('/event-video/summary').then((r) => r.json()).then(setSummary).catch(() => {})
+      }
+      useEffect(() => { load() }, [])
+      const reveal = (dir) => {
+        fetch('/event-video/reveal', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: dir }),
+        }).catch(() => {})
+      }
+      const exportOne = (out) => {
+        fetch('/event-video/export', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out }),
+        }).then((r) => r.json()).then((data) => {
+          if (data.dir) { showToast('已导出 ' + data.dir); reveal(data.dir) } else showToast(data.error || '导出失败')
+        }).catch(() => showToast('导出失败'))
+      }
+      const exportAll = () => {
+        fetch('/event-video/export-summary', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        }).then((r) => r.json()).then((data) => {
+          if (data.dir) { showToast('已导出总览 ' + data.dir); reveal(data.dir) } else showToast(data.error || '导出失败')
+        }).catch(() => showToast('导出失败'))
+      }
+      if (!summary) return h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-note' }, '加载汇总…'))
+      const totals = summary.totals || {}
+      const cards = [
+        ['记录', totals.records], ['总时长', fmtClock(totals.duration)], ['章节', totals.chapters],
+        ['状态', totals.states], ['语元', totals.units],
+      ].map(([label, value]) => h('div', { className: 'dsev-sum-card', key: label },
+        h('div', { className: 'dsev-sum-label' }, label),
+        h('div', { className: 'dsev-sum-value' }, String(value))))
+      const flags = Object.entries(summary.flagsByCode || {}).sort((a, b) => b[1] - a[1])
+        .map(([code, count]) => h('div', { className: 'dsev-flag-row', key: code },
+          h('span', { className: 'dsev-flag-code' }, code),
+          h('span', { className: 'dsev-flag-count' }, String(count))))
+      const tops = (summary.topSegments || []).map((segment, index) => h('div', { className: 'dsev-sum-top', key: index },
+        h('span', { className: 'dsev-num' }, String(index + 1)),
+        h('span', { className: 'dsev-time' }, `${fmtClock(segment.t0)}–${fmtClock(segment.t1)}`),
+        h('span', { className: 'dsev-sum-top-title', title: segment.title }, segment.title),
+        h('span', { className: 'dsev-num' }, String(Math.round(segment.emphasis)))))
+      const rows = (summary.records || []).map((record) => h('tr', { key: record.out },
+        h('td', null, h('span', { className: 'dsev-url', title: record.title }, record.title)),
+        h('td', null, fmtClock(record.duration)),
+        h('td', null, String(record.chapters)),
+        h('td', null, String(record.states)),
+        h('td', null, record.gates ? 'PASS' : 'FAIL'),
+        h('td', null, String(record.flags.length)),
+        h('td', null, h('div', { style: { display: 'flex', gap: 6 } },
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => onOpen(record.out) }, '打开'),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportOne(record.out) }, '导出')))))
+      const table = h('table', { className: 'dsev-table' },
+        h('thead', null, h('tr', null,
+          h('th', null, '记录'), h('th', null, '时长'), h('th', null, '章节'), h('th', null, '状态'), h('th', null, '校验'), h('th', null, '审阅'), h('th', null, ''))),
+        h('tbody', null, rows))
+      return h('div', { className: 'dsev-page' },
+        h('div', { className: 'dsev-topbar' },
+          h('span', { className: 'dsev-topbar-title' }, '全部分析总览'),
+          h('div', { className: 'dsev-topbar-actions' },
+            h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: exportAll }, '导出总览'),
+            h('button', { type: 'button', className: 'dsev-btn', onClick: load }, '刷新'))),
+        h('div', { className: 'dsev-sum-grid' }, cards),
+        h('div', { className: 'dsev-columns' },
+          h('div', null, h('div', { className: 'dsev-card-box' },
+            h('div', { className: 'dsev-card-title' }, '记录'),
+            table)),
+          h('div', { className: 'dsev-rail' },
+            h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, '审阅标记分布'),
+              flags.length === 0 ? h('div', { className: 'dsev-detail-empty' }, '没有标记') : flags),
+            h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, '跨记录注意力最高'),
+              tops.length === 0 ? h('div', { className: 'dsev-detail-empty' }, '暂无数据') : tops))),
+        toast ? h('div', { className: 'dsev-toast' }, toast) : null)
+    }
+
     function UnifiedPanel() {
       const [records, setRecords] = useState([])
       const [error, setError] = useState(null)
@@ -1547,7 +1651,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-rec-meta' }, r.source || (r.video ? '有视频' : '无视频')))))
       const sideHead = h('div', { className: 'dsev-side-head' }, '视频库', h('span', { className: 'dsev-count' }, String(records.length)))
       const tabs = h('div', { className: 'dsev-tabs' },
-        [['review', '审阅'], ['overview', '总览'], ['library', '库'], ['camera', '摄像头']].map(([key, label]) => h('button', {
+        [['review', '审阅'], ['overview', '总览'], ['library', '库'], ['summary', '汇总'], ['camera', '摄像头']].map(([key, label]) => h('button', {
           key, type: 'button',
           className: 'dsev-tab' + (view === key ? ' dsev-tab-on' : ''),
           onClick: () => setView(key),
@@ -1572,7 +1676,9 @@ window.__ModuleLoader__.load({
         ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-error' }, '无法加载记录：', error))
         : view === 'camera'
           ? h(CameraPanel, null)
-          : view === 'library'
+          : view === 'summary'
+            ? h(SummaryView, { onOpen: (out) => { setActiveOut(out); setView('review') } })
+            : view === 'library'
           ? h('div', { className: 'dsev-page' }, h(LibraryView, {
             records,
             onOpen: (out) => { setActiveOut(out); setView('review') },

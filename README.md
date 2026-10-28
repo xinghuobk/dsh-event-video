@@ -115,7 +115,8 @@ Use DSH's plugin manager with `install_bundle` and the `bundle/` directory as ta
 **3. Use it**
 
 - Agent tool: `build_video_event(video, transcript | asr, mode?, hi_labels?)`, then `review_video_event(out)` and report the flags.
-- UI: sidebar **Video Review** → Review (player + synced transcript), Overview (Gantt + chapters), Library (thumbnails, search, tags, compare, queue, trash), Camera.
+- Export: `export_video_analysis(out)` writes `analysis.md` + `chapters.csv` + raw `event.json` under the data home's `exports/`; `summarize_video_analyses()` returns a one-shot overview of every record (totals, review-flag counts, cross-record attention leaders).
+- UI: sidebar **Video Review** → Review (player + synced transcript), Overview (Gantt + chapters), Library (thumbnails, search, tags, compare, queue, trash), Summary (all analyses at a glance + export all), Camera.
 
 ## Camera (Windows, opt-in)
 

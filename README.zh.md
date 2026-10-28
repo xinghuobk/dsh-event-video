@@ -116,7 +116,8 @@ npm install --install-links --legacy-peer-deps "file:/path/to/dsh-event-video/pl
 **3. 使用**
 
 - 模型工具：`build_video_event(video, transcript | asr, mode?, hi_labels?)` → `review_video_event(out)` → 汇报审阅标记；
-- 界面：侧栏「视频审阅」→ 审阅（播放器 + 同步转写）、总览（Gantt + 章节）、库（缩略图、搜索、标签、对比、队列、回收站）、摄像头。
+- 导出：`export_video_analysis(out)` 生成 `analysis.md` + `chapters.csv` + 原始 `event.json`（写到数据目录 `exports/`）；`summarize_video_analyses()` 一次性返回所有记录的总览（总量、审阅标记分布、跨记录注意力最高段落）；
+- 界面：侧栏「视频审阅」→ 审阅（播放器 + 同步转写）、总览（Gantt + 章节）、库（缩略图、搜索、标签、对比、队列、回收站）、汇总（所有分析一屏总览 + 一键导出）、摄像头。
 
 ## 摄像头（Windows，显式开启）
 
