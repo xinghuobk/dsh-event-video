@@ -17,7 +17,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e "engine[dev]"
       - name: Run tests
-        run: pytest -q engine/tests
+        run: pytest -q engine/tests camera/tests
 
   syntax:
     runs-on: ubuntu-latest

@@ -26,6 +26,8 @@ let VLM_MODEL = 'qwen2.5vl'
 let VLM_API_KEY = ''
 let VLM_TIMEOUT_MS = 60000
 let VLM_ENABLED = true
+let MEDIAPIPE_DIR = ''
+let CAMERA_SIGNALS = true
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -52,6 +54,8 @@ function configure(config = {}) {
   VLM_API_KEY = config.vlmApiKey || process.env.DSH_EVENT_VIDEO_VLM_API_KEY || ''
   VLM_TIMEOUT_MS = Number(config.vlmTimeoutMs || process.env.DSH_EVENT_VIDEO_VLM_TIMEOUT_MS || 60000)
   VLM_ENABLED = config.enableVlm !== false && process.env.DSH_EVENT_VIDEO_VLM !== '0'
+  MEDIAPIPE_DIR = resolve(config.mediapipeDir || process.env.DSH_EVENT_VIDEO_MEDIAPIPE_DIR || join(HOME, 'models', 'mediapipe'))
+  CAMERA_SIGNALS = config.enableCameraSignals !== false && process.env.DSH_EVENT_VIDEO_CAMERA_SIGNALS !== '0'
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -1035,13 +1039,16 @@ async function killCameraOrphans() {
   })
 }
 
-async function startCamera() {
+async function startCamera(options = {}) {
   if (cameraChild !== null) return readCameraState()
   await fs.mkdir(CAMERA_DIR, { recursive: true })
   await fs.rm(join(CAMERA_DIR, 'stop.flag'), { force: true })
   await killCameraOrphans()
   cameraLog = ''
-  const child = spawn(PYTHON, [CAMERA_SCRIPT, '--camera-dir', CAMERA_DIR, '--device', CAMERA_DEVICE],
+  const args = [CAMERA_SCRIPT, '--camera-dir', CAMERA_DIR, '--device', CAMERA_DEVICE,
+    '--model-dir', MEDIAPIPE_DIR, '--signals', CAMERA_SIGNALS ? '1' : '0']
+  if (Number(options.calibrate) > 0) args.push('--calibrate', String(Number(options.calibrate)))
+  const child = spawn(PYTHON, args,
     { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
   cameraChild = child
   const collect = (chunk) => { cameraLog = (cameraLog + String(chunk)).slice(-4000) }
@@ -1106,6 +1113,70 @@ async function stopCamera() {
   await fs.rm(join(CAMERA_DIR, 'stop.flag'), { force: true })
   await killCameraOrphans()
   return { running: false }
+}
+
+async function cameraProfile() {
+  try {
+    return JSON.parse(await fs.readFile(join(CAMERA_DIR, 'profile.json'), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+async function writeCameraProfile(profile) {
+  const target = join(CAMERA_DIR, 'profile.json')
+  const tmp = `${target}.tmp-${randomUUID().slice(0, 8)}`
+  await fs.writeFile(tmp, JSON.stringify(profile, null, 1))
+  await fs.rename(tmp, target)
+}
+
+async function calibrateCamera(seconds = 30) {
+  if (!CAMERA_SIGNALS) throw new Error('camera signals are disabled')
+  const duration = Math.max(3, Math.min(120, Number(seconds) || 30))
+  if (cameraChild !== null) await stopCamera()
+  const state = await startCamera({ calibrate: duration })
+  if (state.monitor === false) return { ok: false, startError: state.startError || 'camera did not start', state }
+  await new Promise((resolveWait) => setTimeout(resolveWait, (duration + 3) * 1000))
+  const profile = await cameraProfile()
+  return {
+    ok: Boolean(profile && profile.baseline),
+    seconds: duration,
+    profilePath: join(CAMERA_DIR, 'profile.json'),
+    profile,
+    state: await readCameraState(),
+  }
+}
+
+async function cameraFeedback(observed, corrected) {
+  const givenObserved = String(observed || '').trim()
+  const givenCorrected = String(corrected || '').trim()
+  if (!givenObserved || !givenCorrected) throw new Error('observed and corrected are required')
+  const profile = (await cameraProfile()) || { version: 1, baseline: {}, thresholds: { smile: 0.35, brow: 0.4, blink: 0.7 } }
+  profile.thresholds = profile.thresholds || { smile: 0.35, brow: 0.4, blink: 0.7 }
+  const clamp = (value) => Math.min(0.95, Math.max(0.15, Math.round(value * 1000) / 1000))
+  if (givenObserved === 'smile' && givenCorrected !== 'smile') {
+    profile.thresholds.smile = clamp(Number(profile.thresholds.smile) + 0.03)
+  } else if (givenCorrected === 'smile') {
+    profile.thresholds.smile = clamp(Number(profile.thresholds.smile) - 0.03)
+  }
+  if (givenObserved === 'brow_down' && givenCorrected !== 'brow_down') {
+    profile.thresholds.brow = clamp(Number(profile.thresholds.brow) + 0.03)
+  } else if (givenCorrected === 'brow_down') {
+    profile.thresholds.brow = clamp(Number(profile.thresholds.brow) - 0.03)
+  }
+  profile.feedback = profile.feedback || { total: 0 }
+  profile.feedback.total += 1
+  profile.feedback.last = { observed: givenObserved, corrected: givenCorrected, at: new Date().toISOString() }
+  profile.updatedAt = new Date().toISOString()
+  await writeCameraProfile(profile)
+  try {
+    await fs.appendFile(join(CAMERA_DIR, 'feedback.jsonl'), JSON.stringify({
+      ts: Date.now() / 1000, observed: givenObserved, corrected: givenCorrected,
+    }) + '\n')
+  } catch {
+    /* feedback log is best-effort */
+  }
+  return { ok: true, thresholds: profile.thresholds, total: profile.feedback.total, profilePath: join(CAMERA_DIR, 'profile.json') }
 }
 
 async function cameraSnapshot() {
@@ -1984,6 +2055,24 @@ function handler(req, res) {
       sendJson(res, 200, { python: PYTHON, script: CAMERA_SCRIPT, args, cwd: process.cwd(), result })
       return
     }
+    if (route === '/camera/calibrate' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await calibrateCamera(body.seconds ?? 30))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/camera/feedback' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await cameraFeedback(body.observed, body.corrected))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
     if (route === '/camera/snapshot' && req.method === 'POST') {
       sendJson(res, 200, await cameraSnapshot())
       return
@@ -2258,6 +2347,46 @@ const cameraWaitTool = {
   },
 }
 
+const cameraCalibrateTool = {
+  name: 'camera_calibrate',
+  description: 'Calibrate the camera signal layer against the user\'s neutral face: restarts the monitor with a calibration window, collects face blendshape baselines, and writes camera/profile.json (baseline + personalized thresholds). Use once per user/lighting change before relying on smile/brow events.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { seconds: { type: 'number', description: 'Calibration seconds (default 30, max 120).' } },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 180000,
+  async execute(args) {
+    return calibrateCamera(args.seconds ?? 30)
+  },
+}
+
+const cameraFeedbackTool = {
+  name: 'camera_feedback',
+  description: 'Correct a camera expression signal and personalize thresholds. Example: observed="smile", corrected="neutral" raises the smile threshold so false positives become rarer. Writes camera/profile.json; the running monitor picks it up within ~2s.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['observed', 'corrected'],
+    properties: {
+      observed: { type: 'string', description: 'What the monitor reported: smile | brow_down | neutral.' },
+      corrected: { type: 'string', description: 'What it should have been: smile | brow_down | neutral.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    return cameraFeedback(args.observed, args.corrected)
+  },
+}
+
 const cameraSnapshotTool = {
   name: 'camera_snapshot',
   description: 'Capture one frame from the local camera on demand and return its saved JPEG path. Use read_image on the returned path to actually see the frame; the monitor does not need to be running.',
@@ -2308,6 +2437,10 @@ export function apply(ctx, config) {
     ctx.effect(() => ctx.tools.register(askLibraryTool), 'event-video: ask tool')
   }
   ctx.effect(() => ctx.tools.register(cameraStateTool), 'event-video: camera_state tool')
+  if (CAMERA_SIGNALS) {
+    ctx.effect(() => ctx.tools.register(cameraCalibrateTool), 'event-video: camera_calibrate tool')
+    ctx.effect(() => ctx.tools.register(cameraFeedbackTool), 'event-video: camera_feedback tool')
+  }
   ctx.effect(() => ctx.tools.register(cameraWaitTool), 'event-video: camera_wait tool')
   ctx.effect(() => ctx.tools.register(cameraSnapshotTool), 'event-video: camera_snapshot tool')
 }
@@ -2336,4 +2469,7 @@ export const __test = {
   describeRecord,
   callVlmDescription,
   readVision,
+  cameraProfile,
+  cameraFeedback,
+  calibrateCamera,
 }

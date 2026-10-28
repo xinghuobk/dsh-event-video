@@ -153,7 +153,7 @@ pip install -r camera/requirements.txt
 python camera/camera-monitor.py --device "video=Your Camera"
 ```
 
-The bundle registers three tools: `camera_state` (instant structured state), `camera_wait` (block until a motion/scene/subject event), `camera_snapshot` (single frame path for `read_image`). Capture only starts on explicit user action; frames stay local. The panel preview is a local MJPEG stream (`/camera/stream`) fed by the monitor's 5 Hz frames.
+The monitor also loads local MediaPipe models (`hand_landmarker.task`, `face_landmarker.task`) to emit **gesture / wave / smile / brow_down / face_present / face_absent** events with a personal neutral baseline (`camera_calibrate`) and threshold feedback (`camera_feedback`). The bundle registers: `camera_state` (instant structured state), `camera_wait` (block until a motion/scene/subject event), `camera_snapshot` (single frame path for `read_image`). Capture only starts on explicit user action; frames stay local. The panel preview is a local MJPEG stream (`/camera/stream`) fed by the monitor's 5 Hz frames.
 
 ## Configuration
 
@@ -163,7 +163,7 @@ The bundle registers three tools: `camera_state` (instant structured state), `ca
 | `DSH_EVENT_VIDEO_PYTHON` / `pythonPath` | interpreter with `event-build` installed |
 | `DSH_EVENT_VIDEO_WHISPER` / `whisperModel` | local faster-whisper model dir |
 | `DSH_EVENT_VIDEO_CAMERA_DEVICE` / `cameraDevice` | ffmpeg dshow spec |
-| `DSH_EVENT_VIDEO_ROOTS` / `extraRoots` | extra allowed media roots (`;`-separated) |`n| `DSH_EVENT_VIDEO_VLM_ENDPOINT` / `vlmEndpoint` | Ollama `/api/chat` or OpenAI-compatible chat-completions URL |`n| `DSH_EVENT_VIDEO_VLM_MODEL` / `vlmModel` | VLM model name (e.g. qwen2.5vl) |
+| `DSH_EVENT_VIDEO_ROOTS` / `extraRoots` | extra allowed media roots (`;`-separated) |`n| `DSH_EVENT_VIDEO_VLM_ENDPOINT` / `vlmEndpoint` | Ollama `/api/chat` or OpenAI-compatible chat-completions URL |`n| `DSH_EVENT_VIDEO_VLM_MODEL` / `vlmModel` | VLM model name (e.g. qwen2.5vl) |`n| `DSH_EVENT_VIDEO_MEDIAPIPE_DIR` / `mediapipeDir` | dir with hand/face `.task` models (default `<home>/models/mediapipe`) |`n| `DSH_EVENT_VIDEO_CAMERA_SIGNALS` / `enableCameraSignals` | `0`/false disables gesture+expression events |
 
 ## Review flags
 

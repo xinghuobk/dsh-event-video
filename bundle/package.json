@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-event-video-card",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -8,7 +8,7 @@
     "./client": "./client.js",
     "./icon": "./icon.svg"
   },
-  "files": ["index.js", "client.js", "camera-monitor.py", "cordis.patch.yml", "icon.svg", "README.md"],
+  "files": ["index.js", "client.js", "camera-monitor.py", "signals.py", "cordis.patch.yml", "icon.svg", "README.md"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

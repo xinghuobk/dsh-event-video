@@ -24,12 +24,37 @@ _parser.add_argument("--camera-dir", default=os.environ.get("DSH_EVENT_VIDEO_CAM
                      help="absolute camera directory; overrides <home>/camera")
 _parser.add_argument("--device", default=os.environ.get("DSH_EVENT_VIDEO_CAMERA_DEVICE", "video=Default"),
                      help="ffmpeg dshow device spec, e.g. 'video=HD Webcam'")
+_parser.add_argument("--model-dir", default=os.environ.get("DSH_EVENT_VIDEO_MEDIAPIPE_DIR", ""),
+                     help="directory holding hand_landmarker.task and face_landmarker.task")
+_parser.add_argument("--signals", default="1", help="1/0: enable gesture and face signals")
+_parser.add_argument("--calibrate", type=float, default=0.0,
+                     help="seconds of neutral-face calibration before signal events")
 _args = _parser.parse_args()
 
 ROOT = Path(_args.camera_dir).expanduser() if _args.camera_dir else Path(_args.home).expanduser() / "camera"
 EVENTS_DIR = ROOT / "events"
 ROOT.mkdir(parents=True, exist_ok=True)
 EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+SIGNALS_ENABLED = str(_args.signals).lower() not in ("0", "false", "no", "off")
+MODEL_DIR = Path(_args.model_dir) if _args.model_dir else Path(_args.home).expanduser() / "models" / "mediapipe"
+PROFILE_FILE = ROOT / "profile.json"
+CALIBRATE_SECONDS = max(0.0, float(_args.calibrate or 0.0))
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from signals import (  # noqa: E402
+        GestureStabilizer,
+        WaveDetector,
+        baseline_delta,
+        classify_expression,
+        classify_gesture,
+        face_metrics,
+    )
+except Exception as _signals_error:  # noqa: BLE001 - signals are optional
+    SIGNALS_ENABLED = False
+    GESTURE_HELPERS = None
+    print(f"signals helpers unavailable: {_signals_error}", file=sys.stderr)
 
 PID_FILE = ROOT / "monitor.pid"
 LOG_FILE = ROOT / "monitor.log"
@@ -97,6 +122,35 @@ try:
 except OSError:
     state["events"] = 0
 
+HAND_LANDMARKER = None
+FACE_LANDMARKER = None
+MP_IMAGE = None
+if SIGNALS_ENABLED:
+    try:
+        from mediapipe import Image as _MPImage, ImageFormat as _MPImageFormat
+        from mediapipe.tasks import python as _mp_python
+        from mediapipe.tasks.python import vision as _mp_vision
+
+        _hand_model = MODEL_DIR / "hand_landmarker.task"
+        _face_model = MODEL_DIR / "face_landmarker.task"
+        if _hand_model.exists() and _face_model.exists():
+            HAND_LANDMARKER = _mp_vision.HandLandmarker.create_from_options(
+                _mp_vision.HandLandmarkerOptions(
+                    base_options=_mp_python.BaseOptions(model_asset_path=str(_hand_model)),
+                    running_mode=_mp_vision.RunningMode.VIDEO, num_hands=2))
+            FACE_LANDMARKER = _mp_vision.FaceLandmarker.create_from_options(
+                _mp_vision.FaceLandmarkerOptions(
+                    base_options=_mp_python.BaseOptions(model_asset_path=str(_face_model)),
+                    running_mode=_mp_vision.RunningMode.VIDEO, num_faces=1,
+                    output_face_blendshapes=True))
+            MP_IMAGE = (_MPImage, _MPImageFormat)
+            log("signals enabled")
+        else:
+            log(f"signals models missing in {MODEL_DIR}")
+    except Exception as _signals_init_error:  # noqa: BLE001 - optional capability
+        log(f"signals init failed: {_signals_init_error}")
+state["signals"] = {"enabled": bool(HAND_LANDMARKER and FACE_LANDMARKER)}
+
 
 def write_state() -> None:
     tmp = ROOT / "state.json.tmp"
@@ -143,6 +197,24 @@ def main() -> None:
     frame_no = 0
     raw_no = 0
     latest_saved = 0.0
+    gesture_stabilizer = GestureStabilizer(need=3) if SIGNALS_ENABLED else None
+    wave_detector = WaveDetector() if SIGNALS_ENABLED else None
+    baseline = {}
+    thresholds = {}
+    try:
+        _profile = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+        baseline = _profile.get("baseline") or {}
+        thresholds = _profile.get("thresholds") or {}
+    except (OSError, ValueError):
+        pass
+    calibrate_left = CALIBRATE_SECONDS
+    calibrate_samples: list[dict] = []
+    last_face = 0.0
+    last_expression = 0.0
+    last_gesture = 0.0
+    last_wave = 0.0
+    last_profile_check = 0.0
+    face_on = False
     try:
         while not stop_file.exists():
             buf = proc.stdout.read(FRAME_BYTES)
@@ -219,6 +291,90 @@ def main() -> None:
                     last_emit = now
                 state["subject"] = bool(subject_on)
                 state["subjectRatio"] = round(float(skin), 4)
+
+            if HAND_LANDMARKER is not None and FACE_LANDMARKER is not None:
+                now_ms = int(now * 1000)
+                signals = {"enabled": True, "face": False, "hand": False, "gesture": None,
+                           "smile": None, "brow": None, "expression": None, "wave": False,
+                           "calibrating": calibrate_left > 0}
+                try:
+                    mp_image = MP_IMAGE[0](image_format=MP_IMAGE[1].SRGB, data=np.ascontiguousarray(frame))
+                    hand_result = HAND_LANDMARKER.detect_for_video(mp_image, now_ms)
+                    face_result = FACE_LANDMARKER.detect_for_video(mp_image, now_ms)
+                except Exception as signal_error:  # noqa: BLE001 - keep the monitor alive
+                    log(f"signal inference failed: {signal_error}")
+                    hand_result = face_result = None
+
+                if now - last_profile_check > 2.0:
+                    last_profile_check = now
+                    try:
+                        profile = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+                        baseline = profile.get("baseline") or baseline
+                        thresholds = profile.get("thresholds") or thresholds
+                    except (OSError, ValueError):
+                        pass
+
+                if face_result is not None and face_result.face_landmarks:
+                    signals["face"] = True
+                    if not face_on:
+                        face_on = True
+                        emit("face_present", frame, {"faces": len(face_result.face_landmarks)})
+                        last_face = now
+                    if face_result.face_blendshapes:
+                        metrics = face_metrics(face_result.face_blendshapes[0])
+                        signals["smile"] = metrics["smile"]
+                        signals["brow"] = metrics["brow"]
+                        if baseline:
+                            signals["delta"] = baseline_delta(metrics, baseline)
+                        if calibrate_left > 0:
+                            calibrate_samples.append(metrics)
+                            calibrate_left -= 1.0 / PROC_FPS
+                            if calibrate_left <= 0 and calibrate_samples:
+                                count = len(calibrate_samples)
+                                base = {
+                                    key: round(sum(sample[key] for sample in calibrate_samples) / count, 3)
+                                    for key in ("smile", "brow")
+                                }
+                                thresholds = {
+                                    "smile": round(min(0.9, max(0.2, base["smile"] + 0.15)), 3),
+                                    "brow": round(min(0.9, max(0.2, base["brow"] + 0.2)), 3),
+                                    "blink": 0.7,
+                                }
+                                baseline = base
+                                PROFILE_FILE.write_text(json.dumps({
+                                    "version": 1,
+                                    "baseline": base,
+                                    "thresholds": thresholds,
+                                    "samples": count,
+                                    "calibratedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                }, ensure_ascii=False, indent=1), encoding="utf-8")
+                                log(f"calibration saved samples={count}")
+                                calibrate_samples.clear()
+                        else:
+                            expression = classify_expression(metrics, thresholds)
+                            signals["expression"] = expression
+                            if expression in ("smile", "brow_down") and now - last_expression > COOLDOWN * 2:
+                                emit(expression, frame, {"smile": metrics["smile"], "brow": metrics["brow"]})
+                                last_expression = now
+                elif face_on and now - last_face > 1.0:
+                    face_on = False
+                    emit("face_absent", frame, {})
+
+                if hand_result is not None and hand_result.hand_landmarks:
+                    signals["hand"] = True
+                    labels = [classify_gesture(hand) for hand in hand_result.hand_landmarks]
+                    stable = gesture_stabilizer.update(labels[0]) if gesture_stabilizer else None
+                    signals["gesture"] = labels[0]
+                    signals["hands"] = len(labels)
+                    if stable and now - last_gesture > COOLDOWN * 2:
+                        emit("gesture", frame, {"gesture": stable, "hands": len(labels)})
+                        last_gesture = now
+                    if labels[0] == "open_palm" and wave_detector is not None:
+                        wrist_x = hand_result.hand_landmarks[0][0].x
+                        if wave_detector.update(now, wrist_x, True) and now - last_wave > COOLDOWN * 3:
+                            emit("wave", frame, {"hands": 1})
+                            last_wave = now
+                state["signals"] = signals
 
             state["ts"] = now
             state["frames"] = frame_no
