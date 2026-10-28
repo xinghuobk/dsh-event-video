@@ -1,0 +1,4 @@
+opencv-python>=4.10
+numpy>=1.26
+# Optional: gesture/expression signals. Requires the two .task models, see download_models.py.
+mediapipe>=0.10

@@ -1,6 +1,18 @@
 # runtime data
 video-events/
-camera/
+camera/state.json
+camera/*.jpg
+camera/*.jsonl
+camera/*.log
+camera/*.pid
+camera/*.flag
+camera/*.mp3
+camera/events/
+camera/frames-on-demand/
+camera/profile.json
+camera/feedback.jsonl
+camera/monitor.pid
+camera/stop.flag
 *.mp4
 *.jpg
 *.jpeg

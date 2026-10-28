@@ -138,7 +138,7 @@ npm install --install-links --legacy-peer-deps "file:/path/to/dsh-event-video/pl
 ## 摄像头（Windows，显式开启）
 
 ```bash
-pip install -r camera/requirements.txt
+pip install -r camera/requirements.txt`n# 首次：下载 MediaPipe 手/脸模型（约 11MB）到数据目录`npython camera/download_models.py
 python camera/camera-monitor.py --device "video=Your Camera"
 ```
 

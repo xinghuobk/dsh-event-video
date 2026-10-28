@@ -149,7 +149,7 @@ Use DSH's plugin manager with `install_bundle` and the `bundle/` directory as ta
 ## Camera (Windows, opt-in)
 
 ```bash
-pip install -r camera/requirements.txt
+pip install -r camera/requirements.txt`n# once: fetch the MediaPipe hand/face models (~11 MB) into the data home`npython camera/download_models.py
 python camera/camera-monitor.py --device "video=Your Camera"
 ```
 
