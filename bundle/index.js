@@ -28,6 +28,13 @@ let VLM_TIMEOUT_MS = 60000
 let VLM_ENABLED = true
 let MEDIAPIPE_DIR = ''
 let CAMERA_SIGNALS = true
+let VOICE_ENABLED = true
+let TTS_COMMAND = ''
+let TTS_ENDPOINT = ''
+let TTS_MODEL = 'tts-1'
+let TTS_VOICE = 'alloy'
+let TTS_API_KEY = ''
+let TTS_ARGS = []
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -56,6 +63,15 @@ function configure(config = {}) {
   VLM_ENABLED = config.enableVlm !== false && process.env.DSH_EVENT_VIDEO_VLM !== '0'
   MEDIAPIPE_DIR = resolve(config.mediapipeDir || process.env.DSH_EVENT_VIDEO_MEDIAPIPE_DIR || join(HOME, 'models', 'mediapipe'))
   CAMERA_SIGNALS = config.enableCameraSignals !== false && process.env.DSH_EVENT_VIDEO_CAMERA_SIGNALS !== '0'
+  VOICE_ENABLED = config.enableVoice !== false && process.env.DSH_EVENT_VIDEO_VOICE !== '0'
+  TTS_COMMAND = config.ttsCommand || process.env.DSH_EVENT_VIDEO_TTS_COMMAND || ''
+  TTS_ENDPOINT = config.ttsEndpoint || process.env.DSH_EVENT_VIDEO_TTS_ENDPOINT || ''
+  TTS_MODEL = config.ttsModel || process.env.DSH_EVENT_VIDEO_TTS_MODEL || 'tts-1'
+  TTS_VOICE = config.ttsVoice || process.env.DSH_EVENT_VIDEO_TTS_VOICE || 'alloy'
+  TTS_API_KEY = config.ttsApiKey || process.env.DSH_EVENT_VIDEO_TTS_API_KEY || ''
+  TTS_ARGS = Array.isArray(config.ttsArgs)
+    ? config.ttsArgs.map(String)
+    : String(process.env.DSH_EVENT_VIDEO_TTS_ARGS || '').split('|').filter(Boolean)
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -2073,6 +2089,24 @@ function handler(req, res) {
       }
       return
     }
+    if (route === '/camera/speak' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await speakText(body.text))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/camera/voice-react' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await cameraVoiceReact(body))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
     if (route === '/camera/snapshot' && req.method === 'POST') {
       sendJson(res, 200, await cameraSnapshot())
       return
@@ -2347,6 +2381,92 @@ const cameraWaitTool = {
   },
 }
 
+function runProcess(command, args, timeoutMs = 20000) {
+  return new Promise((resolveRun) => {
+    let child
+    try {
+      child = spawn(command, args, { windowsHide: true, stdio: 'ignore' })
+    } catch {
+      resolveRun(-1)
+      return
+    }
+    const timer = setTimeout(() => { try { child.kill() } catch { /* already gone */ } }, timeoutMs)
+    child.on('error', () => { clearTimeout(timer); resolveRun(-1) })
+    child.on('close', (code) => { clearTimeout(timer); resolveRun(code ?? -1) })
+  })
+}
+
+function escapePowerShell(text) {
+  return String(text).replace(/'/g, "''")
+}
+
+function renderVoiceTemplate(template, event, state) {
+  const base = template && String(template).trim() ? String(template) : '检测到 {kind}'
+  const kind = event && event.kind ? String(event.kind) : 'event'
+  const startedAt = state && Number(state.startedAt)
+  const offset = event && Number.isFinite(Number(event.ts)) && startedAt ? Math.max(0, Number(event.ts) - startedAt) : 0
+  return base
+    .replaceAll('{kind}', kind)
+    .replaceAll('{time}', fmtClock(offset))
+    .replaceAll('{gesture}', event && event.gesture ? String(event.gesture) : '')
+    .replaceAll('{smile}', event && event.smile !== undefined && event.smile !== null ? String(event.smile) : '')
+}
+
+async function speakText(text) {
+  if (!VOICE_ENABLED) throw new Error('voice is disabled')
+  const message = String(text ?? '').trim()
+  if (!message) throw new Error('text is required')
+  if (message.length > 300) throw new Error('text is limited to 300 characters')
+  if (TTS_COMMAND) {
+    const code = await runProcess(TTS_COMMAND, [...TTS_ARGS, message])
+    if (code !== 0) throw new Error(`TTS command exited ${code}`)
+    return { ok: true, provider: 'command', text: message }
+  }
+  if (TTS_ENDPOINT) {
+    const headers = { 'content-type': 'application/json' }
+    if (TTS_API_KEY) headers.authorization = `Bearer ${TTS_API_KEY}`
+    const response = await fetch(TTS_ENDPOINT, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: TTS_MODEL, input: message, voice: TTS_VOICE, response_format: 'mp3' }),
+    })
+    if (!response.ok) throw new Error(`TTS HTTP ${response.status}`)
+    const buffer = Buffer.from(await response.arrayBuffer())
+    await fs.mkdir(CAMERA_DIR, { recursive: true })
+    const audioPath = join(CAMERA_DIR, `tts-${Date.now()}.mp3`)
+    await fs.writeFile(audioPath, buffer)
+    return { ok: true, provider: 'endpoint', audioPath, text: message, note: 'audio saved locally; play it with the system player' }
+  }
+  if (process.platform === 'win32') {
+    const script = `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('${escapePowerShell(message)}')`
+    const code = await runProcess('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], 30000)
+    if (code !== 0) throw new Error(`windows SAPI exited ${code}`)
+    return { ok: true, provider: 'windows-sapi', text: message }
+  }
+  const command = process.platform === 'darwin' ? 'say' : 'espeak'
+  const code = await runProcess(command, [message], 30000)
+  if (code !== 0) throw new Error(`${command} exited ${code}`)
+  return { ok: true, provider: command, text: message }
+}
+
+async function cameraVoiceReact(options = {}) {
+  if (!VOICE_ENABLED) throw new Error('voice is disabled')
+  const kinds = Array.isArray(options.kinds) && options.kinds.length > 0
+    ? options.kinds.map(String)
+    : ['wave', 'gesture', 'face_present', 'smile']
+  const timeoutS = Math.max(1, Math.min(60, Number(options.timeoutS) || 15))
+  const waited = await waitCameraEvent(kinds, timeoutS * 1000)
+  if (!waited.event) return { ok: false, timedOut: true, state: waited.state }
+  const text = renderVoiceTemplate(options.template, waited.event, waited.state)
+  let tts = null
+  try {
+    tts = await speakText(text)
+  } catch (error) {
+    tts = { ok: false, error: String(error.message) }
+  }
+  return { ok: true, event: waited.event, spoken: text, tts, state: waited.state }
+}
+
 const cameraCalibrateTool = {
   name: 'camera_calibrate',
   description: 'Calibrate the camera signal layer against the user\'s neutral face: restarts the monitor with a calibration window, collects face blendshape baselines, and writes camera/profile.json (baseline + personalized thresholds). Use once per user/lighting change before relying on smile/brow events.',
@@ -2384,6 +2504,47 @@ const cameraFeedbackTool = {
   timeoutMs: 20000,
   async execute(args) {
     return cameraFeedback(args.observed, args.corrected)
+  },
+}
+
+const speakTextTool = {
+  name: 'speak_text',
+  description: 'Speak a short text locally: Windows SAPI by default, or a configured ttsCommand / OpenAI-compatible ttsEndpoint. Use this to answer by voice after camera_wait or a review question.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['text'],
+    properties: { text: { type: 'string', description: 'Text to speak (max 300 characters).' } },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 60000,
+  async execute(args) {
+    return speakText(args.text)
+  },
+}
+
+const cameraVoiceReactTool = {
+  name: 'camera_voice_react',
+  description: 'Event-triggered voice loop: wait for a camera event (default wave/gesture/face_present/smile), speak a templated response using {kind}/{time}/{gesture}/{smile}, and return the event plus the TTS result. One call covers "wait for event then respond aloud".',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      kinds: { type: 'array', items: { type: 'string' }, description: 'Event kinds to wait for (default wave/gesture/face_present/smile).' },
+      timeoutS: { type: 'number', description: 'Wait timeout in seconds (default 15, max 60).' },
+      template: { type: 'string', description: 'Speech template, e.g. "检测到 {gesture}，已为你继续".' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 90000,
+  async execute(args) {
+    return cameraVoiceReact(args)
   },
 }
 
@@ -2441,6 +2602,10 @@ export function apply(ctx, config) {
     ctx.effect(() => ctx.tools.register(cameraCalibrateTool), 'event-video: camera_calibrate tool')
     ctx.effect(() => ctx.tools.register(cameraFeedbackTool), 'event-video: camera_feedback tool')
   }
+  if (VOICE_ENABLED) {
+    ctx.effect(() => ctx.tools.register(speakTextTool), 'event-video: speak_text tool')
+    ctx.effect(() => ctx.tools.register(cameraVoiceReactTool), 'event-video: camera_voice_react tool')
+  }
   ctx.effect(() => ctx.tools.register(cameraWaitTool), 'event-video: camera_wait tool')
   ctx.effect(() => ctx.tools.register(cameraSnapshotTool), 'event-video: camera_snapshot tool')
 }
@@ -2472,4 +2637,8 @@ export const __test = {
   cameraProfile,
   cameraFeedback,
   calibrateCamera,
+  speakText,
+  renderVoiceTemplate,
+  cameraVoiceReact,
+  runProcess,
 }
