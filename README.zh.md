@@ -93,7 +93,7 @@ python scripts/setup_models.py --with-vlm   # + Ollama 视觉模型（qwen2.5vl:
 
 Windows 封装：`powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -WithVlm`。
 
-完整表格（大小、用途、存放位置、关闭方式）与许可证说明：[docs/MODELS.zh.md](docs/MODELS.zh.md)。模型权重不进仓库，按需下载。
+完整表格（大小、用途、存放位置、关闭方式）与许可证说明：[docs/MODELS.zh.md](docs/MODELS.zh.md)。视觉分层设计（OCR / 几何 / 批量 VLM / 关键帧思考 / GUI 定位）与模型评测方式：[docs/VISION.md](docs/VISION.md)。模型权重不进仓库，按需下载。
 ## 快速开始（只用引擎）
 
 需要 Python 3.10+ 与 PATH 上的 `ffmpeg`。

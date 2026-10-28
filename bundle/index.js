@@ -1876,6 +1876,7 @@ const describeFramesTool = {
       limit: { type: 'number', description: 'Max frames to describe (default 24; keyFrames default 6).' },
       keyFrames: { type: 'boolean', description: 'Only chapter starts, annotations and top-attention states.' },
       think: { type: 'boolean', description: 'Allow model reasoning (slower, local compute only; uses vlmThinkModel).' },
+      model: { type: 'string', description: 'Override the Ollama/OpenAI model for this call, e.g. gemma3:12b or minicpm-v:8b.' },
     },
   },
   output: {
@@ -1884,7 +1885,9 @@ const describeFramesTool = {
   },
   timeoutMs: 900000,
   async execute(args) {
-    return describeRecord(args.out, { limit: args.limit, keyFrames: args.keyFrames, think: args.think })
+    return describeRecord(args.out, {
+      limit: args.limit, keyFrames: args.keyFrames, think: args.think, model: args.model,
+    })
   },
 }
 

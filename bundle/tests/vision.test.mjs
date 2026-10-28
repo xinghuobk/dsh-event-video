@@ -77,5 +77,9 @@ const keyVision = JSON.parse(await readFile(join(out, 'vision.json'), 'utf8'))
 assert.equal(keyVision.think, true)
 assert.equal(keyVision.keyFrames, true)
 
+const custom = await __test.describeRecord(out, { limit: 1, model: 'custom-vlm' })
+assert.equal(custom.model, 'custom-vlm')
+assert.ok(lastBody.includes('custom-vlm'), 'model override reaches the provider request')
+
 server.close()
 console.log('VISION OK')

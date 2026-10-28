@@ -104,7 +104,7 @@ python scripts/setup_models.py --with-vlm   # + Ollama vision model (qwen2.5vl:3
 
 Windows wrapper: `powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -WithVlm`.
 
-Full table (size, purpose, where it goes, how to disable) and license notes: [docs/MODELS.md](docs/MODELS.md). Nothing is committed to the repo: model weights are downloaded on demand.
+Full table (size, purpose, where it goes, how to disable) and license notes: [docs/MODELS.md](docs/MODELS.md). The layered vision design (OCR / geometry / batch VLM / key-frame thinking / GUI grounding) and how models are evaluated: [docs/VISION.md](docs/VISION.md). Nothing is committed to the repo: model weights are downloaded on demand.
 ## Quick start (engine only)
 
 Requires Python 3.10+, `ffmpeg` on PATH.
