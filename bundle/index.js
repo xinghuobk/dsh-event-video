@@ -621,7 +621,7 @@ async function describeRecord(out, options = {}) {
   const event = await eventFor(out)
   const frames = planVisionFrames(event, options.limit || 24)
   if (frames.length === 0) throw new Error('record has no states to describe')
-  const prompt = 'Describe this image factually in 1-2 sentences: visible page/section, readable text, and any obvious UI state or change. Do not guess.'
+  const prompt = '请用中文客观描述这张截图（1-2 句）：可见的页面区块、可读文字、明显的界面状态或变化。不要猜测。'
   const descriptions = []
   let failed = 0
   for (const item of frames) {
