@@ -93,6 +93,18 @@ ffmpeg frames ──► pHash state machine ──► states + transitions
 | `scripts/` | Optional library index builder for standalone use |
 | `docs/architecture.md` | Data model and pipeline details |
 
+## Models (optional, one command)
+
+The core only needs **ffmpeg + Python**. Camera signals, local VLM descriptions and ASR are optional tiers:
+
+```bash
+python scripts/setup_models.py              # MediaPipe hand/face/pose (~17 MB)
+python scripts/setup_models.py --with-vlm   # + Ollama vision model (qwen2.5vl:3b, ~3.2 GB)
+```
+
+Windows wrapper: `powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -WithVlm`.
+
+Full table (size, purpose, where it goes, how to disable) and license notes: [docs/MODELS.md](docs/MODELS.md). Nothing is committed to the repo: model weights are downloaded on demand.
 ## Quick start (engine only)
 
 Requires Python 3.10+, `ffmpeg` on PATH.

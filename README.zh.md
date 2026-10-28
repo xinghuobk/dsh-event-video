@@ -82,6 +82,18 @@ event-build examples/demo/demo.mp4 --out examples/demo/out --transcript examples
 | `scripts/` | 独立使用的库索引脚本 |
 | `docs/architecture.md` | 数据模型与流水线细节 |
 
+## 模型（可选，一条命令）
+
+核心只需要 **ffmpeg + Python**；摄像头信号、本地 VLM 描述、本地 ASR 都是可选层：
+
+```bash
+python scripts/setup_models.py              # MediaPipe 手/脸/姿态模型（约 17 MB）
+python scripts/setup_models.py --with-vlm   # + Ollama 视觉模型（qwen2.5vl:3b，约 3.2 GB）
+```
+
+Windows 封装：`powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -WithVlm`。
+
+完整表格（大小、用途、存放位置、关闭方式）与许可证说明：[docs/MODELS.zh.md](docs/MODELS.zh.md)。模型权重不进仓库，按需下载。
 ## 快速开始（只用引擎）
 
 需要 Python 3.10+ 与 PATH 上的 `ffmpeg`。
