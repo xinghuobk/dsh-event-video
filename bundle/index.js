@@ -21,6 +21,11 @@ let CAMERA_DEVICE = 'video=Default'
 let ROOTS = []
 let ANNOTATIONS_ENABLED = true
 let WORK_ITEMS_ENABLED = true
+let VLM_ENDPOINT = ''
+let VLM_MODEL = 'qwen2.5vl'
+let VLM_API_KEY = ''
+let VLM_TIMEOUT_MS = 60000
+let VLM_ENABLED = true
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -42,6 +47,11 @@ function configure(config = {}) {
   CAMERA_DEVICE = config.cameraDevice || process.env.DSH_EVENT_VIDEO_CAMERA_DEVICE || 'video=Default'
   ANNOTATIONS_ENABLED = config.enableAnnotations !== false && process.env.DSH_EVENT_VIDEO_ANNOTATIONS !== '0'
   WORK_ITEMS_ENABLED = config.enableWorkItems !== false && process.env.DSH_EVENT_VIDEO_WORK_ITEMS !== '0'
+  VLM_ENDPOINT = config.vlmEndpoint || process.env.DSH_EVENT_VIDEO_VLM_ENDPOINT || ''
+  VLM_MODEL = config.vlmModel || process.env.DSH_EVENT_VIDEO_VLM_MODEL || 'qwen2.5vl'
+  VLM_API_KEY = config.vlmApiKey || process.env.DSH_EVENT_VIDEO_VLM_API_KEY || ''
+  VLM_TIMEOUT_MS = Number(config.vlmTimeoutMs || process.env.DSH_EVENT_VIDEO_VLM_TIMEOUT_MS || 60000)
+  VLM_ENABLED = config.enableVlm !== false && process.env.DSH_EVENT_VIDEO_VLM !== '0'
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -519,6 +529,124 @@ async function deleteAnnotation(out, id) {
   return { ok: true, annotations: data.annotations }
 }
 
+function planVisionFrames(event, limit = 24) {
+  const states = [...(event.states || [])].sort((a, b) => a.t0 - b.t0)
+  if (states.length === 0) return []
+  const cap = Math.max(1, Math.min(120, Number(limit) || 24))
+  const picked = new Map()
+  const top = [...states]
+    .sort((a, b) => (b.attention ? b.attention.emphasis : 0) - (a.attention ? a.attention.emphasis : 0))
+    .slice(0, Math.min(3, cap))
+  for (const state of top) picked.set(state.t0, state)
+  const stride = Math.max(1, Math.ceil(states.length / cap))
+  for (let index = 0; index < states.length && picked.size < cap; index += stride) {
+    picked.set(states[index].t0, states[index])
+  }
+  return [...picked.values()]
+    .sort((a, b) => a.t0 - b.t0)
+    .map((state) => ({ t0: state.t0, frame: frameNameFor(event, state.t0) }))
+}
+
+async function callVlmDescription(imageBase64, prompt) {
+  if (!VLM_ENDPOINT) throw new Error('VLM is not configured: set vlmEndpoint / DSH_EVENT_VIDEO_VLM_ENDPOINT (Ollama or an OpenAI-compatible endpoint)')
+  const ollama = /\/api\/chat\/?$/.test(VLM_ENDPOINT)
+  const headers = { 'content-type': 'application/json' }
+  if (VLM_API_KEY) headers.authorization = `Bearer ${VLM_API_KEY}`
+  const body = ollama
+    ? { model: VLM_MODEL, messages: [{ role: 'user', content: prompt, images: [imageBase64] }], stream: false }
+    : {
+      model: VLM_MODEL,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
+        ],
+      }],
+      max_tokens: 220,
+      stream: false,
+    }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), VLM_TIMEOUT_MS)
+  try {
+    const response = await fetch(VLM_ENDPOINT, {
+      method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(`VLM HTTP ${response.status}`)
+    const data = await response.json()
+    const text = ollama ? data.message && data.message.content : data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
+    return String(text || '').trim().slice(0, 600)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function visionPath(out) {
+  return join(out, 'vision.json')
+}
+
+async function readVision(out) {
+  if (!insideRoots(out)) throw new Error('path outside allowed roots')
+  try {
+    return JSON.parse(await fs.readFile(visionPath(out), 'utf8'))
+  } catch {
+    return { version: 1, descriptions: [] }
+  }
+}
+
+async function describeRecord(out, options = {}) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  if (!VLM_ENABLED) throw new Error('VLM descriptions are disabled')
+  if (!VLM_ENDPOINT) throw new Error('VLM is not configured: set vlmEndpoint / DSH_EVENT_VIDEO_VLM_ENDPOINT (Ollama or an OpenAI-compatible endpoint)')
+  const event = await eventFor(out)
+  const frames = planVisionFrames(event, options.limit || 24)
+  if (frames.length === 0) throw new Error('record has no states to describe')
+  const prompt = 'Describe this image factually in 1-2 sentences: visible page/section, readable text, and any obvious UI state or change. Do not guess.'
+  const descriptions = []
+  let failed = 0
+  for (const item of frames) {
+    const candidates = [join(out, 'frames', item.frame), join(out, 'frames-on-demand', item.frame)]
+    let framePath = null
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        framePath = candidate
+        break
+      }
+    }
+    if (!framePath) {
+      failed += 1
+      continue
+    }
+    try {
+      const base64 = (await fs.readFile(framePath)).toString('base64')
+      const description = await callVlmDescription(base64, prompt)
+      if (description) descriptions.push({ t0: item.t0, frame: item.frame, description })
+      else failed += 1
+    } catch {
+      failed += 1
+    }
+  }
+  const data = {
+    version: 1,
+    model: VLM_MODEL,
+    createdAt: new Date().toISOString(),
+    descriptions,
+    failed,
+  }
+  const target = visionPath(out)
+  const tmp = `${target}.tmp-${randomUUID().slice(0, 8)}`
+  await fs.writeFile(tmp, JSON.stringify(data, null, 1))
+  await fs.rename(tmp, target)
+  return {
+    ok: true,
+    out,
+    model: VLM_MODEL,
+    count: descriptions.length,
+    failed,
+    descriptions: descriptions.slice(0, 5),
+  }
+}
+
 async function readRecord(out) {
   if (!insideRoots(out)) throw new Error('path outside allowed roots')
   const event = JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
@@ -534,7 +662,13 @@ async function readRecord(out) {
   } catch {
     /* optional */
   }
-  return { event, review, annotations }
+  let vision = { version: 1, descriptions: [] }
+  try {
+    vision = await readVision(out)
+  } catch {
+    /* optional */
+  }
+  return { event, review, annotations, vision }
 }
 
 async function serveMedia(req, res, url) {
@@ -1510,6 +1644,28 @@ async function askVideoLibrary(question, limit = 6) {
   }
 }
 
+const describeFramesTool = {
+  name: 'describe_video_frames',
+  description: 'Sample the visual states of a record and ask the configured VLM (Ollama /api/chat or an OpenAI-compatible endpoint) to describe each frame factually. Writes vision.json and returns sample descriptions with timestamps. Requires vlmEndpoint config.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      limit: { type: 'number', description: 'Max frames to describe (default 24, max 120).' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 300000,
+  async execute(args) {
+    return describeRecord(args.out, { limit: args.limit })
+  },
+}
+
 const exportWorkItemsTool = {
   name: 'export_work_items',
   description: 'Turn a record into tickets or an SOP: export_video_work_items writes tickets.md/csv/json with time, evidence frame and acceptance; kind="sop" writes ordered steps from chapters. Items can be passed explicitly (title/detail/priority/t0/t1/frame/acceptance) or derived from annotations and review flags.',
@@ -1897,6 +2053,28 @@ function handler(req, res) {
       }
       return
     }
+    if (route === '/event-video/vision' && req.method === 'GET') {
+      const out = url.searchParams.get('out') || ''
+      try {
+        sendJson(res, 200, await readVision(out))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/describe' && req.method === 'POST') {
+      if (!VLM_ENABLED) {
+        sendJson(res, 403, { error: 'VLM descriptions are disabled' })
+        return
+      }
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await describeRecord(body.out, { limit: body.limit }))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
     sendJson(res, 404, { error: 'not found' })
   }
   run().catch((error) => sendJson(res, 500, { error: String(error?.message ?? error) }))
@@ -2122,6 +2300,9 @@ export function apply(ctx, config) {
   if (WORK_ITEMS_ENABLED) {
     ctx.effect(() => ctx.tools.register(exportWorkItemsTool), 'event-video: work items tool')
   }
+  if (VLM_ENABLED) {
+    ctx.effect(() => ctx.tools.register(describeFramesTool), 'event-video: describe frames tool')
+  }
   if ((config || {}).enableSearchTool !== false && process.env.DSH_EVENT_VIDEO_SEARCH !== '0') {
     ctx.effect(() => ctx.tools.register(searchLibraryTool), 'event-video: search tool')
     ctx.effect(() => ctx.tools.register(askLibraryTool), 'event-video: ask tool')
@@ -2151,4 +2332,8 @@ export const __test = {
   exportWorkItems,
   workItemsFromRecord,
   normalizeWorkItems,
+  planVisionFrames,
+  describeRecord,
+  callVlmDescription,
+  readVision,
 }

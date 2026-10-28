@@ -869,7 +869,25 @@ window.__ModuleLoader__.load({
     function ReviewPlayer({ record, data }) {
       const event = data ? data.event : null
       const [annotations, setAnnotations] = useState((data && data.annotations) || [])
-      useEffect(() => { setAnnotations((data && data.annotations) || []) }, [data])
+      const [vision, setVision] = useState((data && data.vision) || { descriptions: [] })
+      useEffect(() => {
+        setAnnotations((data && data.annotations) || [])
+        setVision((data && data.vision) || { descriptions: [] })
+      }, [data])
+      const describeFrames = () => {
+        fetch('/event-video/describe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, limit: 12 }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) {
+            setVision({ descriptions: value.descriptions || [] })
+            window.alert(`已描述 ${value.count} 帧（失败 ${value.failed || 0}）`)
+          } else {
+            window.alert(value.error || 'VLM 描述失败')
+          }
+        }).catch(() => window.alert('VLM 描述失败'))
+      }
       const exportWork = (kind) => {
         fetch('/event-video/work-items', {
           method: 'POST',
@@ -1038,6 +1056,7 @@ window.__ModuleLoader__.load({
         h('button', { type: 'button', className: 'dsev-btn', onClick: addAnnotation }, '标注'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('tickets') }, '工单'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, 'SOP'),
+        h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {
@@ -1108,6 +1127,13 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
                 h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
                 h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))),
+          h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
+            h('div', { className: 'dsev-card-title' }, `VLM 画面描述（${(vision.descriptions || []).length}）`),
+            (vision.descriptions || []).length === 0
+              ? h('div', { className: 'dsev-detail-empty' }, '没有描述：配置 vlmEndpoint 后点「描述画面」')
+              : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
+                h('span', { className: 'dsev-time' }, fmt(item.t0)),
+                h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))),
           h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
             h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
             chapterRows)),
