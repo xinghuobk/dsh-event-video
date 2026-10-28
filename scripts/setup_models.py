@@ -80,7 +80,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Download optional models and check the toolchain")
     parser.add_argument("--home", default=None, help="data home (default: DSH_EVENT_VIDEO_HOME or ~/event-video)")
     parser.add_argument("--with-vlm", action="store_true", help="check Ollama and pull the vision model")
-    parser.add_argument("--vlm-model", default="qwen2.5vl:3b", help="Ollama vision model to pull")
+    parser.add_argument("--vlm-model", default="minicpm-v:8b", help="Ollama vision model to pull")
     parser.add_argument("--offline", action="store_true", help="do not download; only verify what exists")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without changing anything")
     args = parser.parse_args()

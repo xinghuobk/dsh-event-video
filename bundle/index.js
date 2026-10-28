@@ -585,7 +585,13 @@ async function callVlmDescription(imageBase64, prompt) {
   const headers = { 'content-type': 'application/json' }
   if (VLM_API_KEY) headers.authorization = `Bearer ${VLM_API_KEY}`
   const body = ollama
-    ? { model: VLM_MODEL, messages: [{ role: 'user', content: prompt, images: [imageBase64] }], stream: false }
+    ? {
+      model: VLM_MODEL,
+      messages: [{ role: 'user', content: prompt, images: [imageBase64] }],
+      stream: false,
+      think: false,
+      options: { temperature: 0, num_predict: 4096 },
+    }
     : {
       model: VLM_MODEL,
       messages: [{

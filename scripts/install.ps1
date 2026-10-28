@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -WithVlm -InstallOllama
 param(
     [switch]$WithVlm,
-    [string]$VlmModel = "qwen2.5vl:3b",
+    [string]$VlmModel = "minicpm-v:8b",
     [string]$DataHome = "",
     [switch]$InstallOllama,
     [switch]$DryRun

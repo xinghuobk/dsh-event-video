@@ -9,7 +9,7 @@ The plugin is designed to work in **tiers**. The core (video → event record) n
 | MediaPipe `hand_landmarker.task` | 7.8 MB | hand gestures, wave | optional (camera) | `<dataHome>/models/mediapipe/` | `enableCameraSignals: false` |
 | MediaPipe `face_landmarker.task` | 3.8 MB | face present, smile/brow | optional (camera) | same | same |
 | MediaPipe `pose_landmarker.task` | 5.8 MB | `both_hands_up` etc. | optional (camera) | same | same |
-| Ollama + a vision model (e.g. `qwen2.5vl:3b`) | Ollama ~1 GB, model 3.2 GB | `describe_video_frames` | optional | Ollama store (default `~/.ollama`) | `enableVlm: false` |
+| Ollama + a vision model (e.g. `minicpm-v:8b` or `qwen3-vl:8b`) | Ollama ~1 GB, model 5.5-6.2 GB | `describe_video_frames` | optional | Ollama store (`OLLAMA_MODELS`, put it on a large disk) | `enableVlm: false` |
 | faster-whisper + model (e.g. `whisper-small`) | 0.5–3 GB | local ASR instead of a transcript file | optional | any local dir | pass `--transcript` instead |
 | Python `python-docx`, `openpyxl` | ~10 MB | Word/Excel export | optional | engine venv | `formats` without docx/xlsx |
 
@@ -32,7 +32,7 @@ Useful flags:
 ```bash
 python scripts/setup_models.py --dry-run            # show what would happen
 python scripts/setup_models.py --offline --home D:\data\event-video
-python scripts/setup_models.py --with-vlm --vlm-model qwen2.5vl:7b
+python scripts/setup_models.py --with-vlm --vlm-model minicpm-v:8b
 ```
 
 Windows users can run the wrapper:
