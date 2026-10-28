@@ -1,12 +1,24 @@
 # -*- coding: utf-8 -*-
 """Build the multi-video library index: stable id, title, source, duration, thumbnail."""
+import argparse
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(r"D:\agent\video-events")
+_parser = argparse.ArgumentParser(description="Build the event-video library index")
+_parser.add_argument(
+    "--records",
+    default=os.environ.get(
+        "DSH_EVENT_VIDEO_RECORDS",
+        str(Path(os.environ.get("DSH_EVENT_VIDEO_HOME", Path.home() / "event-video")) / "video-events"),
+    ),
+    help="records directory that holds <record>/event.json",
+)
+_args = _parser.parse_args()
+ROOT = Path(_args.records).expanduser()
 INDEX = ROOT / "index.json"
 
 

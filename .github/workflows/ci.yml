@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "engine[dev]"
+      - name: Run tests
+        run: pytest -q engine/tests
+
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Node modules
+        run: |
+          node --check plugin/lib/index.js
+          node --check bundle/index.js
+          node --check bundle/client.js
+      - name: Validate manifests
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('plugin/package.json','utf8')); console.log('plugin manifest ok')"
+          node -e "JSON.parse(require('fs').readFileSync('bundle/package.json','utf8')); console.log('bundle manifest ok')"

@@ -28,6 +28,29 @@
 - **审阅工作台**：视频播放器（拖动/倍速/章节跳转/快捷键）与转写、状态、章节同步；Gantt 总览；视频库（缩略图、搜索、标签、对比、回收站）；构建队列（并发 2、原子写入、自动索引）。
 - **反射式监控**：本地 5Hz 计算运动/亮度/画面变化/主体，事件落盘并保留关键帧；模型工具 `camera_state` / `camera_wait` / `camera_snapshot`，只在事件发生时唤醒模型。
 
+## 配置（去掉本地路径依赖）
+
+数据目录默认为 `~/event-video`，可用环境变量或 bundle 行配置覆盖：
+
+| 变量 / 配置 | 说明 |
+|---|---|
+| `DSH_EVENT_VIDEO_HOME` / `dataHome` | 数据根目录（records / cache / camera 都在其下） |
+| `DSH_EVENT_VIDEO_PYTHON` / `pythonPath` | 装了 `event-build` 的解释器（默认 `python` / `python3`） |
+| `DSH_EVENT_VIDEO_WHISPER` / `whisperModel` | 本地 faster-whisper 模型目录（可选） |
+| `DSH_EVENT_VIDEO_CAMERA_DEVICE` / `cameraDevice` | ffmpeg dshow 设备，如 `video=HD Webcam` |
+| `DSH_EVENT_VIDEO_ROOTS` / `extraRoots` | 额外允许的媒体根目录（`;` 分隔） |
+
+bundle 行配置示例（profile 的 `cordis.patch.yml` 覆盖行）：
+
+```yaml
+- id: event-video-card
+  config:
+    dataHome: D:\data\event-video
+    pythonPath: D:\python\python.exe
+```
+
+插件行的 `config` 同样可配 `pythonPath` / `modelPath` / `defaultOutDir`。
+
 ## 环境
 
 - Windows（DirectShow 摄像头、GPU/CPU ASR）

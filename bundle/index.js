@@ -1,26 +1,52 @@
 /** Host half of the event-video-card bundle: library, media, and a bounded build queue. */
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, promises as fs } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { createReadStream, existsSync, promises as fs } from 'node:fs'
+import { dirname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 
-const ROOTS = [
-  'D:\\agent\\video-events',
-  'D:\\agent\\video-run',
-  'D:\\agent\\video3',
-  'D:\\agent\\models',
-  'D:\\agent\\camera',
-  'D:\\zch28_Downloads',
-]
-const RECORDS_DIR = 'D:\\agent\\video-events'
-const CACHE_DIR = 'D:\\agent\\video-cache'
-const PYTHON = 'D:\\agent\\event-tool\\.venv\\Scripts\\python.exe'
-const INDEX_SCRIPT = 'D:\\agent\\video-run\\build_library_index.py'
-const DEFAULT_WHISPER = 'D:\\agent\\video-run\\whisper-large-v3'
+const PACKAGE_DIR = dirname(fileURLToPath(import.meta.url))
+const PYTHON_DEFAULT = process.platform === 'win32' ? 'python' : 'python3'
+const CAMERA_SCRIPT = join(PACKAGE_DIR, 'camera-monitor.py')
 const MAX_WORKERS = 2
-const CAMERA_DIR = 'D:\\agent\\camera'
-const CAMERA_SCRIPT = 'D:\\agent\\camera-monitor.py'
-const CAMERA_FFMPEG_DEVICE = 'video=HD Webcam'
+
+let HOME = ''
+let RECORDS_DIR = ''
+let CACHE_DIR = ''
+let CAMERA_DIR = ''
+let PYTHON = PYTHON_DEFAULT
+let DEFAULT_WHISPER = ''
+let CAMERA_DEVICE = 'video=Default'
+let ROOTS = []
+
+function defaultHome() {
+  if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
+  return join(os.homedir(), 'event-video')
+}
+
+function splitRoots(value) {
+  if (!value) return []
+  return String(value).split(/[;\n]/).map((entry) => entry.trim()).filter(Boolean)
+}
+
+function configure(config = {}) {
+  HOME = resolve(config.dataHome || config.home || defaultHome())
+  RECORDS_DIR = config.recordsDir ? resolve(config.recordsDir) : join(HOME, 'video-events')
+  CACHE_DIR = config.cacheDir ? resolve(config.cacheDir) : join(HOME, 'video-cache')
+  CAMERA_DIR = config.cameraDir ? resolve(config.cameraDir) : join(HOME, 'camera')
+  PYTHON = config.pythonPath || process.env.DSH_EVENT_VIDEO_PYTHON || PYTHON_DEFAULT
+  DEFAULT_WHISPER = config.whisperModel || process.env.DSH_EVENT_VIDEO_WHISPER || ''
+  CAMERA_DEVICE = config.cameraDevice || process.env.DSH_EVENT_VIDEO_CAMERA_DEVICE || 'video=Default'
+  const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
+  ROOTS = [...new Set([
+    HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
+    join(os.homedir(), 'Downloads'), join(os.homedir(), 'Videos'),
+    ...extra,
+  ].map((entry) => resolve(entry)))]
+}
+
+configure()
 
 const jobs = new Map()
 const pending = []
@@ -118,9 +144,85 @@ async function runPython(script, args, onLine) {
   })
 }
 
+async function buildLibraryIndex() {
+  const items = []
+  let entries = []
+  try {
+    entries = await fs.readdir(RECORDS_DIR, { withFileTypes: true })
+  } catch {
+    entries = []
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('_') || entry.name.endsWith('.tmp')) continue
+    const dir = join(RECORDS_DIR, entry.name)
+    try {
+      const stat = await fs.stat(join(dir, 'event.json'))
+      const event = JSON.parse(await fs.readFile(join(dir, 'event.json'), 'utf8'))
+      let review = {}
+      try {
+        review = JSON.parse(await fs.readFile(join(dir, 'review.json'), 'utf8'))
+      } catch {
+        /* optional sidecar */
+      }
+      const video = review.video || null
+      const duration = Number(event.span_s || 0)
+      const thumb = join(dir, 'thumb.jpg')
+      let hasThumb = true
+      try {
+        await fs.access(thumb)
+      } catch {
+        hasThumb = false
+      }
+      if (!hasThumb && video && existsSync(video)) {
+        await new Promise((resolveThumb) => {
+          const seek = Math.max(1, Math.min(duration * 0.1 || 5, 90))
+          const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-ss', String(seek),
+            '-i', video, '-frames:v', '1', '-vf', 'scale=360:-1', '-y', thumb],
+          { windowsHide: true, stdio: 'ignore' })
+          child.on('close', resolveThumb)
+          child.on('error', resolveThumb)
+        })
+        try {
+          await fs.access(thumb)
+          hasThumb = true
+        } catch {
+          hasThumb = false
+        }
+      }
+      const identity = video || entry.name
+      items.push({
+        id: createHash('sha1').update(dir + '|' + identity).digest('hex').slice(0, 12),
+        videoId: createHash('sha1').update(identity).digest('hex').slice(0, 12),
+        out: dir,
+        title: review.title || entry.name,
+        dir: entry.name,
+        tags: Array.isArray(review.tags) ? review.tags : [],
+        source: video ? video.split(/[\\/]/).pop() : '',
+        video,
+        duration: Math.round(duration * 10) / 10,
+        mode: event.mode || '',
+        states: event.states ? event.states.length : 0,
+        units: event.units ? event.units.length : 0,
+        chapters: event.chapters ? event.chapters.length : 0,
+        gaps: event.gaps ? event.gaps.length : 0,
+        gates: Boolean(event.gates && event.gates.all_ok),
+        thumb: hasThumb ? thumb : null,
+        created: new Date(stat.mtimeMs).toISOString(),
+        updated: new Date(stat.mtimeMs).toISOString(),
+      })
+    } catch {
+      /* not an event record */
+    }
+  }
+  items.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))
+  await fs.mkdir(RECORDS_DIR, { recursive: true }).catch(() => {})
+  await fs.writeFile(join(RECORDS_DIR, 'index.json'), JSON.stringify({ version: 1, items }, null, 1))
+  return items
+}
+
 async function refreshIndex() {
   try {
-    await runPython(INDEX_SCRIPT, [])
+    await buildLibraryIndex()
   } catch {
     /* the index is best-effort; the record still exists on disk */
   }
@@ -530,7 +632,7 @@ async function startCamera() {
   if (cameraChild !== null) return readCameraState()
   await fs.mkdir(CAMERA_DIR, { recursive: true })
   await fs.rm(join(CAMERA_DIR, 'stop.flag'), { force: true })
-  cameraChild = spawn(PYTHON, [CAMERA_SCRIPT], { windowsHide: true, stdio: 'ignore' })
+  cameraChild = spawn(PYTHON, [CAMERA_SCRIPT, '--home', CAMERA_DIR, '--device', CAMERA_DEVICE], { windowsHide: true, stdio: 'ignore' })
   cameraChild.on('close', () => { cameraChild = null })
   return readCameraState()
 }
@@ -553,7 +655,7 @@ async function cameraSnapshot() {
   const path = join(CAMERA_DIR, `snapshot-${Date.now()}.jpg`)
   const code = await new Promise((resolveSnap) => {
     const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'dshow',
-      '-framerate', '15', '-video_size', '640x480', '-i', CAMERA_FFMPEG_DEVICE,
+      '-framerate', '15', '-video_size', '640x480', '-i', CAMERA_DEVICE,
       '-frames:v', '1', '-y', path], { windowsHide: true, stdio: 'ignore' })
     child.on('close', (value) => resolveSnap(value ?? -1))
     child.on('error', () => resolveSnap(-1))
@@ -832,7 +934,9 @@ const cameraSnapshotTool = {
 
 export const inject = ['webServer', 'tools']
 
-export function apply(ctx) {
+export function apply(ctx, config) {
+  configure(config || {})
+  ctx.effect(() => { refreshIndex().catch(() => {}) }, 'event-video: initial index')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: '/event-video',

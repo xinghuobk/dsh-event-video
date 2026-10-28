@@ -1462,7 +1462,7 @@ window.__ModuleLoader__.load({
                   h('div', { style: { fontSize: 11.5 } }, '启动后这里显示 1fps 预览'))),
             h('div', { className: 'dsev-cam-chips' }, chips),
             h('div', { className: 'dsev-cam-note' },
-              '隐私：只有当你点「开始监控」时本地才采集；画面在 Host 本地处理，不上传；事件关键帧保存在 D:\\agent\\camera\\events。',
+              '隐私：只有当你点「开始监控」时本地才采集；画面在 Host 本地处理，不上传；事件关键帧保存在数据目录的 camera/events 下。',
               note ? h('div', { style: { marginTop: 4, color: 'var(--dsev-accent)' } }, note) : null)),
           h('div', { className: 'dsev-card-box' },
             h('div', { className: 'dsev-card-title' }, '事件流'),

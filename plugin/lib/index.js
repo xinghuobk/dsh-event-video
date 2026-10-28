@@ -8,19 +8,25 @@
  */
 import { execFile } from 'node:child_process'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
+
+/** Default data home: <DSH_EVENT_VIDEO_HOME> or ~/event-video. */
+function eventHome() {
+  return process.env.DSH_EVENT_VIDEO_HOME || join(os.homedir(), 'event-video')
+}
 
 export const name = 'event-video'
 
 export const inject = ['tools']
 
 const DEFAULTS = {
-  pythonPath: 'python',
+  pythonPath: process.platform === 'win32' ? 'python' : 'python3',
   modelPath: '',
-  defaultOutDir: '',
+  defaultOutDir: join(eventHome(), 'video-events'),
   timeoutMs: 1800000,
   fps: 1,
   sceneTh: 9,
