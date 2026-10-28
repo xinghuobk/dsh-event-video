@@ -1,0 +1,18 @@
+# Changelog
+
+## 0.2.0
+
+- deterministic `review` block embedded in every build (gates, OCR URL anomalies, unlabeled states, long gaps, alignment outliers, chapter length)
+- `dominant_url`: deterministic chapter URL choice (count, then longest capture, then first appearance)
+- export module: Markdown / CSV / JSON / Word / Excel (`event-build.export_office`)
+- DSH bundle: review tool, export tool, cross-record summary tool and views, tag/duration filters
+- portable configuration: data home, python path, whisper model, camera device and allowed roots
+- JS library indexer (no Python script dependency for the UI)
+- synthetic demo video and README timeline assets
+- CI workflow (engine pytest + Node syntax/manifest checks), issue and PR templates, roadmap
+
+## 0.1.0
+
+- initial engine: frame state machine, OCR labels, transcript alignment, semantic chapters, attention proxy, completeness gates
+- DSH tool plugin and review workbench bundle
+- reflex camera monitor

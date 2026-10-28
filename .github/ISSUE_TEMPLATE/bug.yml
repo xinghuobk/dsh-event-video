@@ -1,0 +1,40 @@
+name: Bug report
+description: Something is wrong with the engine, plugin, UI, or camera
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please include the record directory if possible.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - engine / CLI
+        - DSH tool plugin
+        - Review UI (bundle)
+        - Camera
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Command, expected result, actual result.
+      placeholder: |
+        event-build demo.mp4 --out out --transcript transcript.txt
+        Expected: 4 states; got: 1 state
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python/Node versions, ffmpeg version, install method.
+      placeholder: Windows 11, Python 3.12, Node 24, ffmpeg 8.0, pip install -e "engine[dev]"
+  - type: textarea
+    id: record
+    attributes:
+      label: Record or logs
+      description: Paste review flags, report.md, or a short excerpt of event.json.

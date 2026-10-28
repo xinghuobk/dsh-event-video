@@ -23,3 +23,10 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# demo assets (synthetic, generated locally)
+!assets/*.png
+!assets/*.gif
+!examples/demo/demo.mp4
+examples/demo/out/
+examples/demo/frames-tmp/

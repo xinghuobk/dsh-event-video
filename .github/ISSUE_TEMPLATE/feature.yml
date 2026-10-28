@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest an improvement or a new capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should happen instead? Keep it concrete.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - engine / CLI
+        - DSH tool plugin
+        - Review UI (bundle)
+        - Camera
+        - Docs

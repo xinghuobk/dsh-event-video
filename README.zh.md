@@ -13,6 +13,10 @@
 
 *[English README](README.md)*
 
+![事件记录时间线](assets/demo-timeline.gif)
+
+*50 秒合成评审的引擎产物：状态（蓝）、转移（青）、时间尺、校验与审阅标记，直接由真实 vent.json 渲染。*
+
 ## 为什么做这个
 
 一场 55 分钟的设计评审里有几百个决定，但模型看不了视频；"抽几帧关键画面"又会悄悄漏掉细节——原话、当时打开的是哪个页面、哪一刻发生了变化，全都丢了。
@@ -54,6 +58,18 @@ ffmpeg 抽帧 ──► pHash 状态机 ──► 画面状态 + 转移
                          ├──► 注意力：停留 + 指代/动作语言 + 微交互
                          └──► 审阅：确定性自检标记
 ```
+
+## 试试 50 秒 demo
+
+```bash
+cd engine
+pip install -e ".[dev,office]"
+cd ..
+python examples/demo/make_demo.py
+event-build examples/demo/demo.mp4 --out examples/demo/out --transcript examples/demo/transcript.txt
+```
+
+预期：4 个状态、3 次转移、校验 PASS、1 条审阅标记（章节 49 秒）。
 
 ## 仓库结构
 

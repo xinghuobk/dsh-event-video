@@ -12,6 +12,10 @@ Turn hour-long recordings into **verifiable event records** — visual states, s
 
 *[中文说明](README.zh.md)*
 
+![event record timeline](assets/demo-timeline.gif)
+
+*A 50-second synthetic review built by the engine: states (blue), transitions (teal), time ruler, gates and review flags — rendered from the real `event.json`.*
+
 ## Why
 
 A 55-minute design review contains hundreds of decisions, but an LLM cannot watch a video, and sampling "a few key frames" silently drops details. Summaries lose the exact words, the page that was open, and the moment something changed.
@@ -24,6 +28,30 @@ This project treats a video as an **event stream** instead:
 - every build carries a **deterministic review block** that flags what a human should double-check.
 
 The result is a JSON event record an agent can reason over, plus a review workbench where a human can watch, seek, and verify the same timeline.
+
+| | Frame sampling + summary | DSH Event Video |
+|---|---|---|
+| Coverage | a handful of frames (often ~1%) | every state + transition, partitioned with gates |
+| Evidence | "it said something about pricing" | timestamped speech unit + the page open at that moment |
+| Navigation | trust the summary | chapters tied to page switches and topic shifts |
+| Trust | read and hope | deterministic review flags name what to double-check |
+| Output | a paragraph | `event.json` + Markdown / CSV / Word / Excel |
+
+## Try the 50-second demo
+
+```bash
+cd engine
+pip install -e ".[dev,office]"
+
+cd ..
+python examples/demo/make_demo.py          # synthetic video, no private footage
+event-build examples/demo/demo.mp4 \
+  --out examples/demo/out \
+  --transcript examples/demo/transcript.txt
+cat examples/demo/out/report.md
+```
+
+Expected: 4 states, 3 transitions, gates PASS, and one review flag about a 49-second chapter. The demo video is generated locally with ffmpeg and PIL.
 
 ## What you get
 

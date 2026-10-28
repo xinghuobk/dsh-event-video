@@ -1,0 +1,5 @@
+[00:00] The top bar should stay transparent and fixed while the page scrolls
+[00:10] When I switch the variant the price does not change, please fix that
+[00:20] The primary button is too light, we need more contrast on checkout
+[00:30] The headline font weight is too light, try the semibold version
+[00:40] On the about page we should add a team section below the story
