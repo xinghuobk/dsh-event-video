@@ -1,4 +1,11 @@
-from event_build.chapters import build_chapters
+from event_build.chapters import build_chapters, dominant_url
+
+
+def test_dominant_url_is_deterministic_on_ties():
+    assert dominant_url([]) is None
+    assert dominant_url(["a", "b", "a", "b"]) == "a"
+    assert dominant_url(["b", "b", "a"]) == "b"
+    assert dominant_url(["a", "b", "b", "a"]) == "a"
 
 
 def _states(n, step=40.0, url_at=None):

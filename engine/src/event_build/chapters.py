@@ -25,6 +25,18 @@ def _bounds(states: list[dict], units: list[dict], window: float = 30.0) -> list
     return out
 
 
+def dominant_url(urls: list[str]) -> str | None:
+    """Most frequent URL, with ties broken by first appearance (deterministic)."""
+    if not urls:
+        return None
+    counts: dict[str, int] = {}
+    first: dict[str, int] = {}
+    for index, url in enumerate(urls):
+        counts[url] = counts.get(url, 0) + 1
+        first.setdefault(url, index)
+    return max(counts, key=lambda url: (counts[url], -first[url]))
+
+
 def _spans(cut_set: set[int], n: int) -> list[tuple[int, int]]:
     idx = sorted(cut_set) + [n]
     out, start = [], 0
@@ -117,7 +129,7 @@ def build_chapters(states: list[dict], units: list[dict],
             "t0": sts[0]["t0"],
             "t1": sts[-1]["t1"],
             "reason": "url" if a in forced else "topic",
-            "url": max(set(urls), key=urls.count) if urls else None,
+            "url": dominant_url(urls),
             "dwell": round(sts[-1]["t1"] - sts[0]["t0"], 1),
             "attention": round(sum(s.get("attention", {}).get("emphasis", 0) for s in sts), 1),
             "from": a,
