@@ -1407,7 +1407,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         loadStatus()
         loadEvents()
-        const statusTimer = setInterval(loadStatus, 700)
+        const statusTimer = setInterval(loadStatus, 300)
         const eventTimer = setInterval(loadEvents, 2500)
         return () => { clearInterval(statusTimer); clearInterval(eventTimer) }
       }, [])
@@ -1437,7 +1437,7 @@ window.__ModuleLoader__.load({
 
       const running = state !== null && state.monitor === true
       const frameSrc = running && state.latestFrame
-        ? '/camera/frame?path=' + encodeURIComponent(state.latestFrame) + '&t=' + Math.floor(Date.now() / 1000)
+        ? '/camera/frame?path=' + encodeURIComponent(state.latestFrame) + '&t=' + Date.now()
         : null
       const chips = state === null ? [] : [
         ['监控', running ? '运行中' : '未启动', running],
