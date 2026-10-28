@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-event-video-card",
-  "version": "1.15.11",
+  "version": "1.15.12",
   "private": true,
   "type": "module",
   "exports": {

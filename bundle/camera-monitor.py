@@ -120,8 +120,12 @@ def main() -> None:
     log(f"ffmpeg start device={DEVICE}")
     try:
         proc = subprocess.Popen(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "dshow",
-             "-framerate", str(FPS), "-video_size", f"{W}x{H}", "-i", DEVICE,
+            ["ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-fflags", "nobuffer", "-flags", "low_delay",
+             "-probesize", "32", "-analyzeduration", "0",
+             "-f", "dshow",
+             "-framerate", str(FPS), "-video_size", f"{W}x{H}", "-rtbufsize", "1M",
+             "-i", DEVICE,
              "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             bufsize=FRAME_BYTES * 4,
@@ -151,7 +155,7 @@ def main() -> None:
                 log("first frame")
             raw_no += 1
             now = time.time()
-            if now - latest_saved > 1.0:
+            if now - latest_saved > 0.2:
                 cv2.imwrite(str(ROOT / "latest.jpg"), frame)
                 latest_saved = now
             if raw_no % PROCESS_EVERY != 0:
@@ -195,10 +199,6 @@ def main() -> None:
             if scene_score < 0.5 and ratio > 0.08 and now - last_emit > COOLDOWN:
                 emit("scene_change", frame, {"score": round(scene_score, 3)})
                 last_emit = now
-
-            if now - latest_saved > 1.0 and frame_no % 2 == 0:
-                cv2.imwrite(str(ROOT / "latest.jpg"), frame)
-                latest_saved = now
 
             if frame_no % PROC_FPS == 0:
                 red = frame[:, :, 0].astype(np.float32)
