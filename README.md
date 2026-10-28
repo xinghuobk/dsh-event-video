@@ -153,7 +153,7 @@ pip install -r camera/requirements.txt
 python camera/camera-monitor.py --device "video=Your Camera"
 ```
 
-The bundle registers three tools: `camera_state` (instant structured state), `camera_wait` (block until a motion/scene/subject event), `camera_snapshot` (single frame path for `read_image`). Capture only starts on explicit user action; frames stay local.
+The bundle registers three tools: `camera_state` (instant structured state), `camera_wait` (block until a motion/scene/subject event), `camera_snapshot` (single frame path for `read_image`). Capture only starts on explicit user action; frames stay local. The panel preview is a local MJPEG stream (`/camera/stream`) fed by the monitor's 5 Hz frames.
 
 ## Configuration
 

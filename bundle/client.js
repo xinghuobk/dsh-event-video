@@ -1445,9 +1445,7 @@ window.__ModuleLoader__.load({
       }
 
       const running = state !== null && state.monitor === true
-      const frameSrc = running && state.latestFrame
-        ? '/camera/frame?path=' + encodeURIComponent(state.latestFrame) + '&t=' + Date.now()
-        : null
+      const frameSrc = running && state.latestFrame ? '/camera/stream' : null
       const chips = state === null ? [] : [
         ['监控', running ? '运行中' : '未启动', running],
         ['帧率', `${state.fps || 5}fps`, false],

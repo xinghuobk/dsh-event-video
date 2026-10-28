@@ -1090,6 +1090,49 @@ const readVideoFrameTool = {
   },
 }
 
+async function serveCameraStream(req, res) {
+  const boundary = 'dshevframe'
+  res.writeHead(200, {
+    'content-type': `multipart/x-mixed-replace; boundary=${boundary}`,
+    'cache-control': 'no-store, no-cache, must-revalidate',
+    pragma: 'no-cache',
+    connection: 'close',
+  })
+  const path = join(CAMERA_DIR, 'latest.jpg')
+  let lastMtime = 0
+  let closed = false
+  let timer = null
+  let maxTimer = null
+  const finish = () => {
+    if (closed) return
+    closed = true
+    clearInterval(timer)
+    clearTimeout(maxTimer)
+    try { res.end() } catch { /* client already gone */ }
+  }
+  req.on('close', finish)
+  res.on('close', finish)
+  maxTimer = setTimeout(finish, 15 * 60 * 1000)
+
+  const pushFrame = async () => {
+    if (closed) return
+    try {
+      const stat = await fs.stat(path)
+      if (stat.mtimeMs === lastMtime) return
+      lastMtime = stat.mtimeMs
+      const buffer = await fs.readFile(path)
+      if (closed) return
+      res.write(`--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${buffer.length}\r\n\r\n`)
+      res.write(buffer)
+      res.write('\r\n')
+    } catch {
+      /* no frame yet; keep the stream open */
+    }
+  }
+  timer = setInterval(pushFrame, 100)
+  await pushFrame()
+}
+
 function handler(req, res) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`)
   const route = url.pathname
@@ -1236,6 +1279,10 @@ function handler(req, res) {
     }
     if (route === '/camera/snapshot' && req.method === 'POST') {
       sendJson(res, 200, await cameraSnapshot())
+      return
+    }
+    if (route === '/camera/stream' && req.method === 'GET') {
+      await serveCameraStream(req, res)
       return
     }
     if (route === '/camera/frame') {

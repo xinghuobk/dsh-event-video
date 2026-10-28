@@ -142,7 +142,7 @@ pip install -r camera/requirements.txt
 python camera/camera-monitor.py --device "video=Your Camera"
 ```
 
-bundle 注册三个工具：`camera_state`（即时结构化状态）、`camera_wait`（阻塞等待运动/画面/主体事件）、`camera_snapshot`（抓帧路径，配合 `read_image`）。只有用户显式开启才采集，画面留在本地。
+bundle 注册三个工具：`camera_state`（即时结构化状态）、`camera_wait`（阻塞等待运动/画面/主体事件）、`camera_snapshot`（抓帧路径，配合 `read_image`）。只有用户显式开启才采集，画面留在本地。面板预览走本地 MJPEG 流（`/camera/stream`），由监控的 5Hz 帧驱动。
 
 ## 配置
 
