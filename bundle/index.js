@@ -995,6 +995,101 @@ async function exportSummary() {
   return { ok: true, dir, files: [md, json, csv] }
 }
 
+function contextAt(event, time, windowSec = 8) {
+  const states = event.states || []
+  const chapters = event.chapters || []
+  const units = event.units || []
+  const state = states.find((item) => item.t0 <= time && time <= item.t1) || null
+  const chapter = chapters.find((item) => item.t0 <= time && time <= item.t1) || null
+  const transcript = units
+    .filter((unit) => unit.t1 >= time - windowSec && unit.t0 <= time + windowSec)
+    .slice(0, 8)
+    .map((unit) => ({ t0: unit.t0, t1: unit.t1, text: unit.text }))
+  return {
+    state: state && {
+      t0: state.t0, t1: state.t1, url: state.url_hint ?? null,
+      label: state.label_hi || state.label || state.label_speech || null,
+      attention: state.attention ? state.attention.emphasis : null,
+    },
+    chapter: chapter && {
+      t0: chapter.t0, t1: chapter.t1, reason: chapter.reason, url: chapter.url ?? null,
+      attention: chapter.attention,
+    },
+    transcript,
+  }
+}
+
+async function frameFor(out, t) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const time = Number(t)
+  if (!Number.isFinite(time)) throw new Error('t must be a number of seconds')
+  const event = JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
+  const fps = Number(event.fps || 1)
+  const start = Number(event.start || 0)
+  const frameIndex = Math.max(1, Math.round((time - start) * fps) + 1)
+  const name = `f_${String(frameIndex).padStart(6, '0')}.jpg`
+  const framesDir = join(out, 'frames')
+  let frame = join(framesDir, name)
+  if (!existsSync(frame)) {
+    const cacheDir = join(out, 'frames-on-demand')
+    await fs.mkdir(cacheDir, { recursive: true })
+    frame = join(cacheDir, name)
+    if (!existsSync(frame)) {
+      const video = event.video
+      if (!video || !existsSync(video)) {
+        throw new Error(`frame ${name} is missing and the source video is not available`)
+      }
+      const code = await new Promise((resolveExtract) => {
+        const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-ss', String(time),
+          '-i', video, '-frames:v', '1', '-y', frame], { windowsHide: true, stdio: 'ignore' })
+        child.on('close', (value) => resolveExtract(value ?? -1))
+        child.on('error', () => resolveExtract(-1))
+      })
+      if (code !== 0) throw new Error(`failed to extract frame at ${time}s`)
+    }
+  }
+  return {
+    out,
+    t: time,
+    frame,
+    frameIndex,
+    video: event.video ?? null,
+    ...contextAt(event, time),
+    hint: 'call read_image on `frame` to actually see the picture',
+  }
+}
+
+function serveFrameImage(res, path) {
+  fs.stat(path).then((stat) => {
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': stat.size, 'cache-control': 'no-store' })
+    createReadStream(path).pipe(res)
+  }).catch(() => {
+    sendJson(res, 404, { error: 'frame not found' })
+  })
+}
+
+const readVideoFrameTool = {
+  name: 'read_video_frame',
+  description: 'Return the exact frame at a timestamp of a built event record, with the scene label, chapter and nearby speech. Use read_image on the returned `frame` path to actually see the picture. Use this to spot-check review flags or answer "what was on screen at mm:ss".',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 't'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      t: { type: 'number', description: 'Seconds from the start of the recording.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 30000,
+  async execute(args) {
+    return frameFor(args.out, args.t)
+  },
+}
+
 function handler(req, res) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`)
   const route = url.pathname
@@ -1014,6 +1109,21 @@ function handler(req, res) {
     }
     if (route === '/event-video/media') {
       await serveMedia(req, res, url)
+      return
+    }
+    if (route === '/event-video/frame') {
+      const out = url.searchParams.get('out') || ''
+      const time = Number(url.searchParams.get('t') || '0')
+      try {
+        const info = await frameFor(out, time)
+        if ((url.searchParams.get('format') || '') === 'image') {
+          serveFrameImage(res, info.frame)
+        } else {
+          sendJson(res, 200, info)
+        }
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
       return
     }
     if (route === '/event-video/thumb') {
@@ -1345,9 +1455,22 @@ export function apply(ctx, config) {
     handler,
   }), 'event-video: camera routes')
   ctx.effect(() => ctx.tools.register(reviewTool), 'event-video: review tool')
+  if ((config || {}).enableFrameTool !== false && process.env.DSH_EVENT_VIDEO_FRAME_TOOL !== '0') {
+    ctx.effect(() => ctx.tools.register(readVideoFrameTool), 'event-video: frame tool')
+  }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
   ctx.effect(() => ctx.tools.register(cameraStateTool), 'event-video: camera_state tool')
   ctx.effect(() => ctx.tools.register(cameraWaitTool), 'event-video: camera_wait tool')
   ctx.effect(() => ctx.tools.register(cameraSnapshotTool), 'event-video: camera_snapshot tool')
+}
+
+export const __test = {
+  frameFor,
+  contextAt,
+  readVideoFrameTool,
+  reviewEventRecord,
+  recordFromEvent,
+  chaptersCsv,
+  configure,
 }

@@ -992,6 +992,15 @@ window.__ModuleLoader__.load({
         h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: toggle }, playing ? '暂停' : '播放'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => seek(time - 5) }, '-5s'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => seek(time + 5) }, '+5s'),
+        h('button', {
+          type: 'button',
+          className: 'dsev-btn',
+          onClick: () => {
+            const out = record && record.out
+            if (!out) return
+            window.open('/event-video/frame?out=' + encodeURIComponent(out) + '&t=' + Math.round(time) + '&format=image', '_blank')
+          },
+        }, '看帧'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {

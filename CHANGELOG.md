@@ -8,7 +8,7 @@
 - DSH bundle: review tool, export tool, cross-record summary tool and views, tag/duration filters
 - portable configuration: data home, python path, whisper model, camera device and allowed roots
 - JS library indexer (no Python script dependency for the UI)
-- synthetic demo video and README timeline assets
+- `read_video_frame` tool + `/event-video/frame` route (on-demand frame, scene context, on-demand ffmpeg extraction, `enableFrameTool` switch, acceptance test)`n- synthetic demo video and README timeline assets
 - CI workflow (engine pytest + Node syntax/manifest checks), issue and PR templates, roadmap
 
 ## 0.1.0

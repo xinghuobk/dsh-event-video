@@ -31,6 +31,8 @@ jobs:
           node --check plugin/lib/index.js
           node --check bundle/index.js
           node --check bundle/client.js
+      - name: Bundle tests
+        run: node --test bundle/tests
       - name: Validate manifests
         run: |
           node -e "JSON.parse(require('fs').readFileSync('plugin/package.json','utf8')); console.log('plugin manifest ok')"
