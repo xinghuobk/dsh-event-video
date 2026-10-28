@@ -26,7 +26,12 @@ def _bounds(states: list[dict], units: list[dict], window: float = 30.0) -> list
 
 
 def dominant_url(urls: list[str]) -> str | None:
-    """Most frequent URL, with ties broken by first appearance (deterministic)."""
+    """Most frequent URL; ties prefer the longer capture, then first appearance.
+
+    OCR line-wrapping can truncate an address-bar read, so among equally common
+    URLs the longer string is the more complete capture. First appearance breaks
+    remaining ties, keeping the choice deterministic.
+    """
     if not urls:
         return None
     counts: dict[str, int] = {}
@@ -34,7 +39,7 @@ def dominant_url(urls: list[str]) -> str | None:
     for index, url in enumerate(urls):
         counts[url] = counts.get(url, 0) + 1
         first.setdefault(url, index)
-    return max(counts, key=lambda url: (counts[url], -first[url]))
+    return max(counts, key=lambda url: (counts[url], len(url), -first[url]))
 
 
 def _spans(cut_set: set[int], n: int) -> list[tuple[int, int]]:

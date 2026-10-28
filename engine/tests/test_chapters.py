@@ -6,6 +6,8 @@ def test_dominant_url_is_deterministic_on_ties():
     assert dominant_url(["a", "b", "a", "b"]) == "a"
     assert dominant_url(["b", "b", "a"]) == "b"
     assert dominant_url(["a", "b", "b", "a"]) == "a"
+    # equal counts: the longer capture is the more complete address-bar read
+    assert dominant_url(["https://x/short", "https://x/short?full=1"]) == "https://x/short?full=1"
 
 
 def _states(n, step=40.0, url_at=None):
