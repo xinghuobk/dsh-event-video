@@ -1090,6 +1090,204 @@ const readVideoFrameTool = {
   },
 }
 
+function tokenize(text) {
+  const lower = String(text ?? '').toLowerCase()
+  const tokens = []
+  for (const word of lower.match(/[a-z0-9]{2,}/g) || []) tokens.push(word)
+  for (const run of lower.match(/[\u4e00-\u9fff]+/g) || []) {
+    if (run.length <= 2) {
+      tokens.push(run)
+      for (const char of run) tokens.push(char)
+      continue
+    }
+    for (let index = 0; index < run.length - 1; index += 1) tokens.push(run.slice(index, index + 2))
+  }
+  return tokens
+}
+
+function searchSignature(records) {
+  return createHash('sha1')
+    .update(records.map((record) => `${record.id}:${record.updated || ''}`).join('|'))
+    .digest('hex')
+}
+
+async function buildSearchIndex(records) {
+  const chunks = []
+  for (const item of records) {
+    let event
+    try {
+      event = JSON.parse(await fs.readFile(join(item.out, 'event.json'), 'utf8'))
+    } catch {
+      continue
+    }
+    const title = item.title || item.name || item.dir || item.out
+    const fps = Number(event.fps || 1)
+    const start = Number(event.start || 0)
+    const videoId = item.videoId || item.id
+    const frameAt = (t) => `f_${String(Math.max(1, Math.round((Number(t) - start) * fps) + 1)).padStart(6, '0')}.jpg`
+    for (const unit of event.units || []) {
+      if (!unit.text) continue
+      chunks.push({
+        recordId: item.id, videoId, title, out: item.out, t0: unit.t0, t1: unit.t1,
+        kind: 'speech', text: unit.text, frame: frameAt(unit.t0), url: null,
+      })
+    }
+    for (const state of event.states || []) {
+      const text = state.label_hi || state.label || state.label_speech
+      if (!text) continue
+      chunks.push({
+        recordId: item.id, videoId, title, out: item.out, t0: state.t0, t1: state.t1,
+        kind: 'screen', text, frame: frameAt(state.t0), url: state.url_hint ?? null,
+      })
+    }
+  }
+  const index = { version: 2, builtAt: new Date().toISOString(), signature: searchSignature(records), chunks }
+  await fs.mkdir(join(HOME, 'index'), { recursive: true })
+  await fs.writeFile(join(HOME, 'index', 'search-index.json'), JSON.stringify(index))
+  return index
+}
+
+async function ensureSearchIndex() {
+  const records = await listRecords()
+  const path = join(HOME, 'index', 'search-index.json')
+  try {
+    const index = JSON.parse(await fs.readFile(path, 'utf8'))
+    if (index.version === 2 && index.signature === searchSignature(records)) return index
+  } catch {
+    /* rebuild below */
+  }
+  return buildSearchIndex(records)
+}
+
+async function searchLibrary(query, limit = 8, filterOut = null) {
+  const index = await ensureSearchIndex()
+  const qTokens = [...new Set(tokenize(query))]
+  const chunks = filterOut ? index.chunks.filter((chunk) => chunk.out === filterOut) : index.chunks
+  const N = chunks.length
+  if (qTokens.length === 0 || N === 0) return { query, total: 0, hits: [] }
+
+  const tokenized = chunks.map((chunk) => tokenize(chunk.text))
+  const documentFrequency = new Map()
+  for (const token of qTokens) {
+    let count = 0
+    for (const tokens of tokenized) if (tokens.includes(token)) count += 1
+    documentFrequency.set(token, count)
+  }
+  const averageLength = tokenized.reduce((sum, tokens) => sum + tokens.length, 0) / N
+  const k1 = 1.2
+  const b = 0.75
+  const scored = []
+  chunks.forEach((chunk, indexOfChunk) => {
+    const tokens = tokenized[indexOfChunk]
+    const frequency = new Map()
+    for (const token of tokens) frequency.set(token, (frequency.get(token) || 0) + 1)
+    let score = 0
+    for (const token of qTokens) {
+      const tf = frequency.get(token)
+      if (!tf) continue
+      const idf = Math.log((N + 1) / ((documentFrequency.get(token) || 0) + 1)) + 1
+      score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (tokens.length / Math.max(1, averageLength))))
+    }
+    if (score > 0) scored.push({ chunk, score })
+  })
+  scored.sort((a, b2) => b2.score - a.score)
+  const cap = Math.max(1, Math.min(50, Number(limit) || 8))
+  // The same source video may have several builds; cite it once and note duplicates.
+  const deduped = []
+  const seen = new Map()
+  for (const entry of scored) {
+    const { chunk } = entry
+    const key = `${chunk.videoId || chunk.recordId}|${chunk.t0}|${chunk.text.slice(0, 60)}`
+    const existing = seen.get(key)
+    if (existing) {
+      existing.duplicates += 1
+      continue
+    }
+    const hit = {
+      recordId: chunk.recordId,
+      videoId: chunk.videoId || chunk.recordId,
+      title: chunk.title,
+      out: chunk.out,
+      t0: chunk.t0,
+      t1: chunk.t1,
+      at: fmtClock(chunk.t0),
+      kind: chunk.kind,
+      text: chunk.text.slice(0, 220),
+      frame: chunk.frame,
+      url: chunk.url,
+      score: Math.round(entry.score * 1000) / 1000,
+      duplicates: 0,
+    }
+    seen.set(key, hit)
+    deduped.push(hit)
+    if (deduped.length >= cap) break
+  }
+  return { query, total: scored.length, unique: deduped.length, hits: deduped }
+}
+
+async function askVideoLibrary(question, limit = 6) {
+  const result = await searchLibrary(question, limit)
+  return {
+    question,
+    answer_guidance: 'Answer only from the evidence below. Cite every claim as [title @ mm:ss]. If the evidence is insufficient, say what is missing instead of guessing.',
+    searched: result.total,
+    evidence: result.hits.map((hit) => ({
+      title: hit.title,
+      at: hit.at,
+      t0: hit.t0,
+      frame: hit.frame,
+      kind: hit.kind,
+      quote: hit.text,
+      score: hit.score,
+    })),
+  }
+}
+
+const searchLibraryTool = {
+  name: 'search_video_library',
+  description: 'Search every analyzed video in the library for timestamped evidence (speech units and on-screen labels). Returns ranked hits with record title, time, frame path and quote. Use ask_video_library when you need an answer with citations.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['query'],
+    properties: {
+      query: { type: 'string', description: 'Keywords or a natural-language phrase.' },
+      limit: { type: 'number', description: 'Max hits (default 8).' },
+      out: { type: 'string', description: 'Optional: restrict to one record directory.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 60000,
+  async execute(args) {
+    return searchLibrary(args.query, args.limit ?? 8, args.out ?? null)
+  },
+}
+
+const askLibraryTool = {
+  name: 'ask_video_library',
+  description: 'Answer a question from the analyzed-video library using retrieved timestamped evidence. Returns an evidence list with citations (title, mm:ss, frame, quote) and guidance to answer only from that evidence.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['question'],
+    properties: {
+      question: { type: 'string', description: 'Question in the user\'s language.' },
+      limit: { type: 'number', description: 'Max evidence items (default 6).' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 60000,
+  async execute(args) {
+    return askVideoLibrary(args.question, args.limit ?? 6)
+  },
+}
+
 async function serveCameraStream(req, res) {
   const boundary = 'dshevframe'
   res.writeHead(200, {
@@ -1287,6 +1485,18 @@ function handler(req, res) {
     }
     if (route === '/camera/frame') {
       await serveThumb(req, res, url)
+      return
+    }
+    if (route === '/event-video/search' && req.method === 'GET') {
+      const query = url.searchParams.get('q') || ''
+      const limit = Number(url.searchParams.get('limit') || '8')
+      sendJson(res, 200, await searchLibrary(query, limit, url.searchParams.get('out') || null))
+      return
+    }
+    if (route === '/event-video/ask' && req.method === 'GET') {
+      const question = url.searchParams.get('q') || ''
+      const limit = Number(url.searchParams.get('limit') || '6')
+      sendJson(res, 200, await askVideoLibrary(question, limit))
       return
     }
     sendJson(res, 404, { error: 'not found' })
@@ -1507,6 +1717,10 @@ export function apply(ctx, config) {
   }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
+  if ((config || {}).enableSearchTool !== false && process.env.DSH_EVENT_VIDEO_SEARCH !== '0') {
+    ctx.effect(() => ctx.tools.register(searchLibraryTool), 'event-video: search tool')
+    ctx.effect(() => ctx.tools.register(askLibraryTool), 'event-video: ask tool')
+  }
   ctx.effect(() => ctx.tools.register(cameraStateTool), 'event-video: camera_state tool')
   ctx.effect(() => ctx.tools.register(cameraWaitTool), 'event-video: camera_wait tool')
   ctx.effect(() => ctx.tools.register(cameraSnapshotTool), 'event-video: camera_snapshot tool')
@@ -1520,4 +1734,8 @@ export const __test = {
   recordFromEvent,
   chaptersCsv,
   configure,
+  tokenize,
+  searchLibrary,
+  askVideoLibrary,
+  buildSearchIndex,
 }

@@ -1502,6 +1502,16 @@ window.__ModuleLoader__.load({
       const [tagFilter, setTagFilter] = useState('')
       const [minDur, setMinDur] = useState('')
       const [maxDur, setMaxDur] = useState('')
+      const [query, setQuery] = useState('')
+      const [hits, setHits] = useState(null)
+      const runSearch = () => {
+        const text = query.trim()
+        if (!text) return
+        fetch('/event-video/search?q=' + encodeURIComponent(text) + '&limit=10')
+          .then((r) => r.json())
+          .then(setHits)
+          .catch(() => showToast('检索失败'))
+      }
       const load = () => {
         fetch('/event-video/summary').then((r) => r.json()).then(setSummary).catch(() => {})
       }
@@ -1602,6 +1612,28 @@ window.__ModuleLoader__.load({
             value: maxDur, onChange: (e) => setMaxDur(e.target.value),
           }),
           h('span', { className: 'dsev-meta' }, `${filteredRecords.length} / ${allRecords.length} 条`)),
+        h('div', { className: 'dsev-toolbar' },
+          h('input', {
+            className: 'dsev-input', style: { flex: 1, maxWidth: 420 }, placeholder: '跨库检索：登录、缩略图、导航…',
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') runSearch() },
+          }),
+          h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: runSearch }, '检索'),
+          h('span', { className: 'dsev-meta' }, hits ? `${hits.hits.length} / ${hits.total} 条命中` : '带时间戳的引用')),
+        hits && hits.hits && hits.hits.length > 0
+          ? h('div', { className: 'dsev-card-box' },
+            h('div', { className: 'dsev-card-title' }, '检索结果'),
+            hits.hits.map((hit, index) => h('div', { className: 'dsev-sum-top', key: index },
+              h('span', { className: 'dsev-num' }, String(index + 1)),
+              h('span', { className: 'dsev-time' }, hit.at),
+              h('span', { className: 'dsev-sum-top-title', title: hit.text }, `${hit.title} · ${hit.text}`),
+              h('button', { type: 'button', className: 'dsev-btn', onClick: () => onOpen(hit.out) }, '打开'),
+              h('button', {
+                type: 'button', className: 'dsev-btn',
+                onClick: () => window.open('/event-video/frame?out=' + encodeURIComponent(hit.out) + '&t=' + Math.round(hit.t0) + '&format=image', '_blank'),
+              }, '看帧'))))
+          : hits ? h('div', { className: 'dsev-detail-empty' }, '没有命中') : null,
         h('div', { className: 'dsev-sum-grid' }, cards),
         h('div', { className: 'dsev-columns' },
           h('div', null, h('div', { className: 'dsev-card-box' },
