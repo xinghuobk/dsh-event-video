@@ -62,6 +62,7 @@ function summaryText(event, outDir) {
     attention_top: top,
     alignment: event.alignment,
     gates: gates.all_ok ? 'PASS' : `FAIL: ${failed.join(', ')}`,
+    review: event.review ?? null,
   }, null, 1)
 }
 
@@ -116,7 +117,7 @@ export function apply(ctx, rawConfig) {
   const config = resolveConfig(rawConfig)
   const definition = {
     name: 'build_video_event',
-    description: 'Build a verified event record from a local video: frame state machine, speech units, timestamp anchors, semantic chapters, attention proxy, and completeness gates. Returns the output directory and counts; the full record is event.json there. Use when the user wants a long video read completely with every statement anchored to a timestamp.',
+    description: 'Build a verified event record from a local video: frame state machine, speech units, timestamp anchors, semantic chapters, attention proxy, and completeness gates. Returns the output directory, counts, and a deterministic `review` block (flags worth double-checking). Use when the user wants a long video read completely with every statement anchored to a timestamp. Always report the review flags in your answer.',
     parameters: PARAMETERS,
     output: {
       schema: {

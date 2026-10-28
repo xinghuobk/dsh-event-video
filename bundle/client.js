@@ -1558,6 +1558,9 @@ window.__ModuleLoader__.load({
         active ? h('span', { className: 'dsev-badge' },
           h('i', { className: 'dsev-badge-dot' + (active.gates ? '' : ' dsev-badge-dot-bad') }),
           active.gates ? 'PASS' : 'FAIL') : null,
+        (data && data.event && data.event.review && data.event.review.flags && data.event.review.flags.length > 0)
+          ? h('span', { className: 'dsev-badge' }, `审阅 ${data.event.review.flags.length}`)
+          : null,
         h('div', { className: 'dsev-topbar-actions' },
           active ? h('button', { type: 'button', className: 'dsev-btn', onClick: renameActive }, '改名') : null,
           active ? h('button', { type: 'button', className: 'dsev-btn', onClick: revealActive }, '目录') : null,

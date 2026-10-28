@@ -615,6 +615,16 @@ function handler(req, res) {
       await handleTags(req, res)
       return
     }
+    if (route === '/event-video/review' && req.method === 'POST') {
+      const body = await readBody(req)
+      if (!body.out || !insideRoots(body.out)) {
+        sendJson(res, 400, { error: 'invalid out' })
+        return
+      }
+      const event = JSON.parse(await fs.readFile(join(body.out, 'event.json'), 'utf8'))
+      sendJson(res, 200, reviewEventRecord(event))
+      return
+    }
     if (route === '/event-video/rename' && req.method === 'POST') {
       await handleRename(req, res)
       return
@@ -662,6 +672,112 @@ function handler(req, res) {
     sendJson(res, 404, { error: 'not found' })
   }
   run().catch((error) => sendJson(res, 500, { error: String(error?.message ?? error) }))
+}
+
+function reviewEventRecord(event) {
+  const states = event.states || []
+  const chapters = event.chapters || []
+  const units = event.units || []
+  const gaps = event.gaps || []
+  const gates = event.gates || {}
+  const alignment = event.alignment || {}
+  const flags = []
+
+  const failed = Object.entries(gates).filter(([, value]) => value && value.ok === false).map(([key]) => key)
+  if (failed.length > 0) {
+    flags.push({ level: 'error', code: 'gates_failed', message: '构建校验未通过：' + failed.join('、') })
+  }
+
+  const urls = [...new Set(states.map((s) => s.url_hint).filter(Boolean))]
+  for (const url of urls) {
+    if (url.includes('?') && !url.includes('=')) {
+      flags.push({ level: 'warn', code: 'url_missing_separators', message: 'URL 缺少 = / &，疑似 OCR 误读：' + url })
+    } else if (/(analytics_trace_id|client_id|locale|redirect_uri)-/.test(url)) {
+      flags.push({ level: 'warn', code: 'url_hyphen_separators', message: 'URL 用 - 代替 = / &，疑似 OCR 误读：' + url })
+    }
+  }
+
+  const unlabeled = states.filter((s) => !s.label && !s.label_hi && !s.label_speech)
+  if (unlabeled.length > 0) {
+    flags.push({ level: 'warn', code: 'states_unlabeled', message: `${unlabeled.length} 个状态没有任何标签（语音/OCR 均空）` })
+  }
+
+  const longGaps = gaps.filter((g) => (g.duration ?? (g.t1 - g.t0)) >= 60)
+  if (longGaps.length > 0) {
+    flags.push({ level: 'info', code: 'long_speech_gaps', message: `${longGaps.length} 段语音缺口 ≥60 秒，汇报时需说明这些区间的依据` })
+  }
+
+  if ((alignment.action_match_rate ?? 1) < 0.7) {
+    flags.push({ level: 'warn', code: 'weak_action_alignment', message: `动作对齐命中率偏低：${alignment.action_match_rate}` })
+  }
+  if ((alignment.lag_p25_s ?? 0) < -20) {
+    flags.push({ level: 'warn', code: 'large_speech_lag', message: `语音滞后 p25 = ${alignment.lag_p25_s}s，部分状态可能借用较远语句` })
+  }
+
+  for (const chapter of chapters) {
+    if (chapter.dwell < 30 || chapter.dwell > 300) {
+      flags.push({ level: 'info', code: 'chapter_length_outlier', message: `章节长度异常：${Math.round(chapter.dwell)}s` })
+    }
+  }
+
+  const topStates = [...states]
+    .sort((a, b) => (b.attention ? b.attention.emphasis : 0) - (a.attention ? a.attention.emphasis : 0))
+    .slice(0, 3)
+    .map((s) => ({
+      t0: s.t0,
+      t1: s.t1,
+      url: s.url_hint ?? null,
+      label: s.label_hi || s.label || s.label_speech || null,
+      emphasis: s.attention ? s.attention.emphasis : 0,
+    }))
+
+  const longestGaps = longGaps
+    .slice()
+    .sort((a, b) => (b.duration ?? (b.t1 - b.t0)) - (a.duration ?? (a.t1 - a.t0)))
+    .slice(0, 3)
+    .map((g) => {
+      const near = units
+        .filter((u) => u.t1 >= g.t0 && u.t0 <= g.t1)
+        .map((u) => u.text)
+        .join('')
+        .slice(0, 120)
+      return { t0: g.t0, t1: g.t1, duration: Math.round(g.duration ?? (g.t1 - g.t0)), speech: near }
+    })
+
+  return {
+    ok: flags.every((f) => f.level !== 'error'),
+    counts: {
+      states: states.length,
+      chapters: chapters.length,
+      units: units.length,
+      gaps: gaps.length,
+      urls: urls.length,
+      chapters_without_url: chapters.filter((c) => !c.url).length,
+    },
+    flags,
+    samples: { topStates, longestGaps },
+  }
+}
+
+const reviewTool = {
+  name: 'review_video_event',
+  description: 'Review a built event record before reporting it: completeness gates, OCR URL anomalies (missing = / &, truncated), unlabeled states, long speech gaps, alignment outliers, chapter length anomalies. Call this immediately after build_video_event and include the flags in your answer.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out'],
+    properties: { out: { type: 'string', description: 'Event record output directory (the `out` returned by build_video_event).' } },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    if (!args.out || !insideRoots(args.out)) throw new Error('out is missing or outside allowed roots')
+    const event = JSON.parse(await fs.readFile(join(args.out, 'event.json'), 'utf8'))
+    return event.review || reviewEventRecord(event)
+  },
 }
 
 const cameraStateTool = {
@@ -727,6 +843,7 @@ export function apply(ctx) {
     path: '/camera',
     handler,
   }), 'event-video: camera routes')
+  ctx.effect(() => ctx.tools.register(reviewTool), 'event-video: review tool')
   ctx.effect(() => ctx.tools.register(cameraStateTool), 'event-video: camera_state tool')
   ctx.effect(() => ctx.tools.register(cameraWaitTool), 'event-video: camera_wait tool')
   ctx.effect(() => ctx.tools.register(cameraSnapshotTool), 'event-video: camera_snapshot tool')

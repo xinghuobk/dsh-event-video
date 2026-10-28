@@ -100,3 +100,20 @@ def test_parse_transcript_window_and_gaps(tmp_path):
     # gap bounds are start-to-start: (0,5), (5,40), tail (40,60)
     assert len(gaps) == 3 and gaps[0]["t0"] == 0 and gaps[1]["t0"] == 5
     assert parse_transcript(p, 10, None)[0]["text"] == "丙"
+
+def test_review_flags_catch_ocr_url_and_weak_alignment():
+    from event_build.pipeline import review_of
+    states = [{"t0": 0, "t1": 10, "label_hi": "Sign in", "label_speech": "登录",
+               "url_hint": "https://shopify.com/login?analytics_trace_id-42313680",
+               "attention": {"emphasis": 5.0}}]
+    chapters = [{"t0": 0, "t1": 10, "dwell": 10, "url": "https://shopify.com"}]
+    units = [{"t0": 0, "t1": 10, "text": "登录一下"}]
+    gates = {"visual_partition": {"ok": True}, "all_ok": False}
+    review = review_of(states, chapters, units, [], {"action_match_rate": 0.5}, gates)
+    codes = [f["code"] for f in review["flags"]]
+    assert review["ok"] is False
+    assert "gates_failed" in codes
+    assert "url_missing_separators" in codes
+    assert "weak_action_alignment" in codes
+    assert "chapter_length_outlier" in codes
+    assert review["samples"]["top_states"][0]["t0"] == 0

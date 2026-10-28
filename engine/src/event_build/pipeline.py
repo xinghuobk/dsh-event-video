@@ -339,6 +339,75 @@ def fmt(sec: float) -> str:
     return f"{s // 60:02d}:{s % 60:02d}"
 
 
+def review_of(states: list[dict], chapters: list[dict], units: list[dict],
+              gaps: list[dict], alignment: dict, gates: dict) -> dict:
+    """Deterministic self-review carried by every build: flags worth double-checking."""
+    flags: list[dict] = []
+    failed = [key for key, value in gates.items()
+              if isinstance(value, dict) and value.get("ok") is False]
+    if gates.get("all_ok") is False or failed:
+        flags.append({"level": "error", "code": "gates_failed",
+                      "message": "构建校验未通过：" + ("、".join(failed) if failed else "all_ok")})
+
+    urls: list[str] = []
+    for state in states:
+        url = state.get("url_hint")
+        if url and url not in urls:
+            urls.append(url)
+    for url in urls:
+        if "?" in url and "=" not in url:
+            flags.append({"level": "warn", "code": "url_missing_separators",
+                          "message": "URL 缺少 = / &，疑似 OCR 误读：" + url})
+
+    unlabeled = [s for s in states
+                 if not (s.get("label") or s.get("label_hi") or s.get("label_speech"))]
+    if unlabeled:
+        flags.append({"level": "warn", "code": "states_unlabeled",
+                      "message": f"{len(unlabeled)} 个状态没有任何标签（语音/OCR 均空）"})
+
+    long_gaps = [g for g in gaps if (g["t1"] - g["t0"]) >= 60]
+    if long_gaps:
+        flags.append({"level": "info", "code": "long_speech_gaps",
+                      "message": f"{len(long_gaps)} 段语音缺口 ≥60 秒，汇报时需说明这些区间的依据"})
+
+    rate = alignment.get("action_match_rate")
+    if rate is not None and rate < 0.7:
+        flags.append({"level": "warn", "code": "weak_action_alignment",
+                      "message": f"动作对齐命中率偏低：{rate}"})
+    if (alignment.get("lag_p25_s") or 0) < -20:
+        flags.append({"level": "warn", "code": "large_speech_lag",
+                      "message": f"语音滞后 p25 = {alignment.get('lag_p25_s')}s，部分状态可能借用较远语句"})
+
+    for chapter in chapters:
+        if chapter["dwell"] < 30 or chapter["dwell"] > 300:
+            flags.append({"level": "info", "code": "chapter_length_outlier",
+                          "message": f"章节长度异常：{round(chapter['dwell'])}s"})
+
+    top = sorted(states, key=lambda s: -s["attention"]["emphasis"])[:3]
+    top_states = [{
+        "t0": s["t0"], "t1": s["t1"], "url": s.get("url_hint"),
+        "label": s.get("label_hi") or s.get("label") or s.get("label_speech"),
+        "emphasis": s["attention"]["emphasis"],
+    } for s in top]
+    longest = sorted(long_gaps, key=lambda g: -(g["t1"] - g["t0"]))[:3]
+    gap_samples = [{
+        "t0": g["t0"], "t1": g["t1"], "duration": round(g["t1"] - g["t0"]),
+        "speech": "".join(u["text"] for u in units
+                          if u["t1"] >= g["t0"] and u["t0"] <= g["t1"])[:120],
+    } for g in longest]
+
+    return {
+        "ok": not any(f["level"] == "error" for f in flags),
+        "counts": {
+            "states": len(states), "chapters": len(chapters), "units": len(units),
+            "gaps": len(gaps), "urls": len(urls),
+            "chapters_without_url": sum(1 for c in chapters if not c.get("url")),
+        },
+        "flags": flags,
+        "samples": {"top_states": top_states, "longest_gaps": gap_samples},
+    }
+
+
 def build(cfg: BuildConfig) -> tuple[dict, dict]:
     import time as _time
     from event_build import SCHEMA_VERSION
@@ -461,7 +530,8 @@ def build(cfg: BuildConfig) -> tuple[dict, dict]:
              "fps": cfg.fps, "start": cfg.start, "span_s": span, "frames": n,
              "states": states, "transitions": transitions, "units": units,
              "segments": segments, "chapters": chapters, "gaps": gaps, "alignment": alignment,
-             "gates": gates, "elapsed_s": round(_time.time() - t_begin, 1)}
+             "gates": gates, "review": review_of(states, chapters, units, gaps, alignment, gates),
+             "elapsed_s": round(_time.time() - t_begin, 1)}
     (out / "event.json").write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
     (out / "coverage.json").write_text(json.dumps(gates, ensure_ascii=False, indent=1), encoding="utf-8")
     md = [f"# Event record · {Path(cfg.video).name}", "",
@@ -472,6 +542,10 @@ def build(cfg: BuildConfig) -> tuple[dict, dict]:
     for k, v in gates.items():
         if isinstance(v, dict):
             md.append(f"| {k} | {v.get('ok')} |")
+    if event["review"]["flags"]:
+        md += ["", "## review flags", ""]
+        for flag in event["review"]["flags"]:
+            md.append(f"- [{flag['level']}] {flag['code']}: {flag['message']}")
     (out / "report.md").write_text("\n".join(md), encoding="utf-8")
     log(f"gates={'PASS' if gates['all_ok'] else 'FAIL'} elapsed={event['elapsed_s']}s")
     return event, gates
