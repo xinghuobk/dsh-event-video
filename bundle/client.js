@@ -874,6 +874,20 @@ window.__ModuleLoader__.load({
         setAnnotations((data && data.annotations) || [])
         setVision((data && data.vision) || { descriptions: [] })
       }, [data])
+      const describeKeyFrames = () => {
+        fetch('/event-video/describe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, limit: 5, keyFrames: true, think: true }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) {
+            setVision({ descriptions: value.descriptions || [], model: value.model })
+            window.alert(`关键帧思考完成：${value.count} 帧（${value.model}）`)
+          } else {
+            window.alert(value.error || '关键帧思考失败')
+          }
+        }).catch(() => window.alert('关键帧思考失败'))
+      }
       const describeFrames = () => {
         fetch('/event-video/describe', {
           method: 'POST',
@@ -1057,6 +1071,7 @@ window.__ModuleLoader__.load({
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('tickets') }, '工单'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, 'SOP'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
+        h('button', { type: 'button', className: 'dsev-btn', onClick: describeKeyFrames }, '关键帧思考'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {

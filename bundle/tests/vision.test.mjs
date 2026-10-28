@@ -5,10 +5,12 @@ import { tmpdir } from 'node:os'
 import http from 'node:http'
 
 const home = await mkdtemp(join(tmpdir(), 'dsh-event-video-vision-'))
+let lastBody = ''
 const server = http.createServer((req, res) => {
   let body = ''
   req.on('data', (chunk) => { body += chunk })
   req.on('end', () => {
+    lastBody = body
     assert.ok(body.includes('image_url'), 'OpenAI-style request carries an image_url data payload')
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ choices: [{ message: { content: '假 VLM 描述：页面顶部是导航，中间是商品大图。' } }] }))
@@ -58,6 +60,22 @@ assert.ok(vision.createdAt)
 
 const sanitized = await __test.readVision(out)
 assert.equal(sanitized.descriptions.length, 3)
+
+const keyPlanned = __test.planKeyVisionFrames(event, 2)
+assert.equal(keyPlanned.length, 2)
+assert.ok(keyPlanned.some((item) => item.t0 === 10), 'key-frame plan keeps the top-attention state')
+
+const keyResult = await __test.describeRecord(out, { limit: 2, keyFrames: true, think: true })
+assert.equal(keyResult.ok, true)
+assert.equal(keyResult.think, true)
+assert.equal(keyResult.keyFrames, true)
+assert.equal(keyResult.model, 'qwen3-vl:8b')
+assert.ok(keyResult.count >= 1)
+assert.ok(lastBody.includes('reasoning_effort') || lastBody.includes('max_tokens'), 'thinking requests carry a larger budget')
+
+const keyVision = JSON.parse(await readFile(join(out, 'vision.json'), 'utf8'))
+assert.equal(keyVision.think, true)
+assert.equal(keyVision.keyFrames, true)
 
 server.close()
 console.log('VISION OK')

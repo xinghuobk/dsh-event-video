@@ -23,6 +23,7 @@ let ANNOTATIONS_ENABLED = true
 let WORK_ITEMS_ENABLED = true
 let VLM_ENDPOINT = ''
 let VLM_MODEL = 'qwen2.5vl'
+let VLM_THINK_MODEL = 'qwen3-vl:8b'
 let VLM_API_KEY = ''
 let VLM_TIMEOUT_MS = 60000
 let VLM_ENABLED = true
@@ -58,6 +59,7 @@ function configure(config = {}) {
   WORK_ITEMS_ENABLED = config.enableWorkItems !== false && process.env.DSH_EVENT_VIDEO_WORK_ITEMS !== '0'
   VLM_ENDPOINT = config.vlmEndpoint || process.env.DSH_EVENT_VIDEO_VLM_ENDPOINT || ''
   VLM_MODEL = config.vlmModel || process.env.DSH_EVENT_VIDEO_VLM_MODEL || 'qwen2.5vl'
+  VLM_THINK_MODEL = config.vlmThinkModel || process.env.DSH_EVENT_VIDEO_VLM_THINK_MODEL || 'qwen3-vl:8b'
   VLM_API_KEY = config.vlmApiKey || process.env.DSH_EVENT_VIDEO_VLM_API_KEY || ''
   VLM_TIMEOUT_MS = Number(config.vlmTimeoutMs || process.env.DSH_EVENT_VIDEO_VLM_TIMEOUT_MS || 60000)
   VLM_ENABLED = config.enableVlm !== false && process.env.DSH_EVENT_VIDEO_VLM !== '0'
@@ -579,21 +581,24 @@ function planVisionFrames(event, limit = 24) {
     .map((state) => ({ t0: state.t0, frame: frameNameFor(event, state.t0) }))
 }
 
-async function callVlmDescription(imageBase64, prompt) {
+async function callVlmDescription(imageBase64, prompt, options = {}) {
   if (!VLM_ENDPOINT) throw new Error('VLM is not configured: set vlmEndpoint / DSH_EVENT_VIDEO_VLM_ENDPOINT (Ollama or an OpenAI-compatible endpoint)')
   const ollama = /\/api\/chat\/?$/.test(VLM_ENDPOINT)
   const headers = { 'content-type': 'application/json' }
   if (VLM_API_KEY) headers.authorization = `Bearer ${VLM_API_KEY}`
+  const model = options.model || VLM_MODEL
+  const think = options.think === true
+  const numPredict = think ? 4096 : 1024
   const body = ollama
     ? {
-      model: VLM_MODEL,
+      model,
       messages: [{ role: 'user', content: prompt, images: [imageBase64] }],
       stream: false,
-      think: false,
-      options: { temperature: 0, num_predict: 4096 },
+      think,
+      options: { temperature: 0, num_predict: numPredict },
     }
     : {
-      model: VLM_MODEL,
+      model,
       messages: [{
         role: 'user',
         content: [
@@ -601,19 +606,23 @@ async function callVlmDescription(imageBase64, prompt) {
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
         ],
       }],
-      max_tokens: 220,
+      max_tokens: think ? 1200 : 220,
       stream: false,
+      ...(think ? { reasoning_effort: 'low' } : {}),
     }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), VLM_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), think ? Math.max(VLM_TIMEOUT_MS, 120000) : VLM_TIMEOUT_MS)
   try {
     const response = await fetch(VLM_ENDPOINT, {
       method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
     })
     if (!response.ok) throw new Error(`VLM HTTP ${response.status}`)
     const data = await response.json()
-    const text = ollama ? data.message && data.message.content : data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
-    return String(text || '').trim().slice(0, 600)
+    let text = ollama ? data.message && data.message.content : data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
+    if (!text && ollama && data.message && data.message.thinking) {
+      throw new Error('model returned thinking only; increase num_predict or use a non-thinking model')
+    }
+    return { text: String(text || '').trim().slice(0, 800), thinking: think }
   } finally {
     clearTimeout(timer)
   }
@@ -632,14 +641,61 @@ async function readVision(out) {
   }
 }
 
+function planKeyVisionFrames(event, limit = 6, extraTimes = []) {
+  const states = [...(event.states || [])].sort((a, b) => a.t0 - b.t0)
+  if (states.length === 0) return []
+  const cap = Math.max(1, Math.min(40, Number(limit) || 6))
+  const picked = new Map()
+  const nearest = (t) => states.reduce((best, state) => {
+    if (!best) return state
+    return Math.abs(state.t0 - t) < Math.abs(best.t0 - t) ? state : best
+  }, null)
+  const addTime = (t) => {
+    const state = nearest(Number(t))
+    if (state) picked.set(state.t0, state)
+  }
+  const top = [...states]
+    .sort((a, b) => (b.attention ? b.attention.emphasis : 0) - (a.attention ? a.attention.emphasis : 0))
+    .slice(0, Math.min(3, cap))
+  for (const state of top) addTime(state.t0)
+  for (const chapter of event.chapters || []) {
+    if (picked.size >= cap) break
+    addTime(chapter.t0)
+  }
+  for (const time of extraTimes) {
+    if (picked.size >= cap) break
+    addTime(time)
+  }
+  const stride = Math.max(1, Math.ceil(states.length / cap))
+  for (let index = 0; index < states.length && picked.size < cap; index += stride) {
+    picked.set(states[index].t0, states[index])
+  }
+  return [...picked.values()]
+    .sort((a, b) => a.t0 - b.t0)
+    .map((state) => ({ t0: state.t0, frame: frameNameFor(event, state.t0) }))
+}
+
 async function describeRecord(out, options = {}) {
   if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
   if (!VLM_ENABLED) throw new Error('VLM descriptions are disabled')
   if (!VLM_ENDPOINT) throw new Error('VLM is not configured: set vlmEndpoint / DSH_EVENT_VIDEO_VLM_ENDPOINT (Ollama or an OpenAI-compatible endpoint)')
   const event = await eventFor(out)
-  const frames = planVisionFrames(event, options.limit || 24)
+  const think = options.think === true
+  const keyFrames = options.keyFrames === true
+  let annotationTimes = []
+  try {
+    annotationTimes = (await readAnnotations(out)).annotations.map((annotation) => annotation.t0)
+  } catch {
+    /* annotations are optional */
+  }
+  const frames = keyFrames
+    ? planKeyVisionFrames(event, options.limit || 6, annotationTimes)
+    : planVisionFrames(event, options.limit || 24)
   if (frames.length === 0) throw new Error('record has no states to describe')
-  const prompt = '请用中文客观描述这张截图（1-2 句）：可见的页面区块、可读文字、明显的界面状态或变化。不要猜测。'
+  const model = options.model || (think ? VLM_THINK_MODEL : VLM_MODEL)
+  const prompt = think
+    ? '请仔细观察这张截图并思考：页面结构、可读文字、界面状态、以及它对用户意味着什么。然后用中文给出 2-3 句结论性描述，不要输出思考过程。'
+    : '请用中文客观描述这张截图（1-2 句）：可见的页面区块、可读文字、明显的界面状态或变化。不要猜测。'
   const descriptions = []
   let failed = 0
   for (const item of frames) {
@@ -657,8 +713,8 @@ async function describeRecord(out, options = {}) {
     }
     try {
       const base64 = (await fs.readFile(framePath)).toString('base64')
-      const description = await callVlmDescription(base64, prompt)
-      if (description) descriptions.push({ t0: item.t0, frame: item.frame, description })
+      const result = await callVlmDescription(base64, prompt, { model, think })
+      if (result.text) descriptions.push({ t0: item.t0, frame: item.frame, description: result.text, thinking: result.thinking })
       else failed += 1
     } catch {
       failed += 1
@@ -666,7 +722,9 @@ async function describeRecord(out, options = {}) {
   }
   const data = {
     version: 1,
-    model: VLM_MODEL,
+    model,
+    think,
+    keyFrames,
     createdAt: new Date().toISOString(),
     descriptions,
     failed,
@@ -678,7 +736,9 @@ async function describeRecord(out, options = {}) {
   return {
     ok: true,
     out,
-    model: VLM_MODEL,
+    model,
+    think,
+    keyFrames,
     count: descriptions.length,
     failed,
     descriptions: descriptions.slice(0, 5),
@@ -1806,23 +1866,25 @@ async function askVideoLibrary(question, limit = 6) {
 
 const describeFramesTool = {
   name: 'describe_video_frames',
-  description: 'Sample the visual states of a record and ask the configured VLM (Ollama /api/chat or an OpenAI-compatible endpoint) to describe each frame factually. Writes vision.json and returns sample descriptions with timestamps. Requires vlmEndpoint config.',
+  description: 'Ask the configured VLM (Ollama /api/chat or OpenAI-compatible) to describe sampled frames of a record. Use keyFrames+think for a few important frames (chapter starts, annotations, top attention) with a reasoning model; use the default for broad coverage. Writes vision.json.',
   parameters: {
     type: 'object',
     additionalProperties: false,
     required: ['out'],
     properties: {
       out: { type: 'string', description: 'Event record output directory.' },
-      limit: { type: 'number', description: 'Max frames to describe (default 24, max 120).' },
+      limit: { type: 'number', description: 'Max frames to describe (default 24; keyFrames default 6).' },
+      keyFrames: { type: 'boolean', description: 'Only chapter starts, annotations and top-attention states.' },
+      think: { type: 'boolean', description: 'Allow model reasoning (slower, local compute only; uses vlmThinkModel).' },
     },
   },
   output: {
     schema: { type: 'object', additionalProperties: true },
     render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
   },
-  timeoutMs: 300000,
+  timeoutMs: 900000,
   async execute(args) {
-    return describeRecord(args.out, { limit: args.limit })
+    return describeRecord(args.out, { limit: args.limit, keyFrames: args.keyFrames, think: args.think })
   },
 }
 
@@ -2265,7 +2327,7 @@ function handler(req, res) {
       }
       const body = await readBody(req)
       try {
-        sendJson(res, 200, await describeRecord(body.out, { limit: body.limit }))
+        sendJson(res, 200, await describeRecord(body.out, { limit: body.limit, keyFrames: body.keyFrames, think: body.think, model: body.model }))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -2717,6 +2779,7 @@ export const __test = {
   workItemsFromRecord,
   normalizeWorkItems,
   planVisionFrames,
+  planKeyVisionFrames,
   describeRecord,
   callVlmDescription,
   readVision,
