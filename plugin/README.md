@@ -1,3 +1,5 @@
+> **Every second, accounted for. 每一秒，都有据可查。** See the [project README](../README.md) for the full introduction.
+
 # dsh-event-video（DSH 插件）
 
 把 `event-build` 注册成一个模型可调用的工具：`build_video_event`。

@@ -1,3 +1,5 @@
+> **Every second, accounted for. 每一秒，都有据可查。** See the [project README](../README.md) for the full introduction.
+
 # @local/dsh-event-video-card
 
 视频审阅工作台：对话卡片 + 左侧栏「视频审阅」（唯一入口），内置播放器、同步转写、总览时间线、视频库与构建队列。

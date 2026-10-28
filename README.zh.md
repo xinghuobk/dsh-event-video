@@ -1,0 +1,167 @@
+# DSH Event Video
+
+![banner](assets/banner.svg)
+
+**每一秒，都有据可查。**
+
+把一小时的录屏变成**可验证的事件记录**：画面状态、语音语元、语义章节、注意力，以及确定性的审阅标记——全部锚定到时间戳。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-7c8cff.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-52c7bd.svg)](engine/pyproject.toml)
+[![Node](https://img.shields.io/badge/node-22%20%7C%2024-52c7bd.svg)](bundle/package.json)
+[![CI](https://github.com/xinghuobk/dsh-event-video/actions/workflows/ci.yml/badge.svg)](https://github.com/xinghuobk/dsh-event-video/actions)
+
+*[English README](README.md)*
+
+## 为什么做这个
+
+一场 55 分钟的设计评审里有几百个决定，但模型看不了视频；"抽几帧关键画面"又会悄悄漏掉细节——原话、当时打开的是哪个页面、哪一刻发生了变化，全都丢了。
+
+这个项目不把视频当"图片流"，而是当**事件流**：
+
+- 画面状态 + 状态转移**连续覆盖**整条时间线，不跳段；
+- 语音切成带时间戳的语元，并和"画面变化"对齐；
+- 章节按页面切换与话题转折切分，而不是固定时间窗；
+- 每次构建都自带**确定性审阅块**，点名需要人工复核的地方。
+
+产物是一份智能体能推理的 JSON 事件记录，外加一个"边看边核对"的审阅工作台。
+
+## 产物
+
+```
+event.json
+├─ states[]        126 个画面状态：时间、语音标签、OCR 标签、URL、注意力
+├─ transitions[]   125 次状态转移
+├─ units[]         380 条与转移对齐的语音语元
+├─ chapters[]      21 个语义章节（页面切换/话题转折、停留、注意力）
+├─ gaps[]          ≥3 秒的语音缺口，缺失叙述可见
+├─ gates           分区/标签/缺口/语元/章节 校验
+└─ review          审阅标记：OCR URL 异常、无标签状态、弱对齐、长度异常
+```
+
+## 工作原理
+
+```text
+ffmpeg 抽帧 ──► pHash 状态机 ──► 画面状态 + 转移
+      │                 │
+      │                 ├──► 代表帧 OCR ──► 页面标签
+      │                 ├──► 状态起点高分辨率 OCR ──► URL / 标签页提示
+      │                 └──► 语音（转写或本地 ASR）──► 语元
+      │
+      └──► 对齐：哪些话在描述哪次变化（滞后统计）
+                         │
+                         ├──► 章节：页面切换 + 话题低谷
+                         ├──► 注意力：停留 + 指代/动作语言 + 微交互
+                         └──► 审阅：确定性自检标记
+```
+
+## 仓库结构
+
+| 目录 | 说明 |
+|---|---|
+| `engine/` | Python 包 `event-build`：流水线与测试 |
+| `plugin/` | DSH 工具插件，注册 `build_video_event` |
+| `bundle/` | DSH Web 插件：侧栏唯一入口「视频审阅」，含 审阅/总览/库/摄像头 四个标签 |
+| `camera/` | 反射式摄像头监控（本地 5Hz 感知，事件才唤醒模型） |
+| `scripts/` | 独立使用的库索引脚本 |
+| `docs/architecture.md` | 数据模型与流水线细节 |
+
+## 快速开始（只用引擎）
+
+需要 Python 3.10+ 与 PATH 上的 `ffmpeg`。
+
+```bash
+cd engine
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+
+event-build input.mp4 --out out --transcript transcript.txt
+```
+
+转写文件每行一句 `[mm:ss] 文本`；也可以本地转写：
+
+```bash
+pip install -e ".[asr,dev]"
+event-build input.mp4 --out out --asr --whisper-model /path/to/whisper-large-v3
+```
+
+得到 `out/event.json`、`out/report.md`（校验 + 审阅标记）、`out/coverage.json`。
+
+## 接入 DSH
+
+**1. 安装工具插件**
+
+```bash
+cd "$DSH_PROFILE_DIR"
+npm install --install-links --legacy-peer-deps "file:/path/to/dsh-event-video/plugin"
+```
+
+在 profile 的 `cordis.patch.yml` 追加（**必须写在 `insert` 里，且用相对路径**——裸包名从 DSH 安装目录解析，profile 里的包不会被看到）：
+
+```yaml
+- insert:
+    - id: event-video
+      name: ./node_modules/dsh-event-video/lib/index.js
+      config:
+        pythonPath: /path/to/engine/.venv/bin/python
+        modelPath: /path/to/whisper-large-v3
+        defaultOutDir: /path/to/data/video-events
+```
+
+**2. 安装界面插件**
+
+用 DSH 的 plugin manager `install_bundle`，target 指向 `bundle/` 目录；重启 DSH。
+
+**3. 使用**
+
+- 模型工具：`build_video_event(video, transcript | asr, mode?, hi_labels?)` → `review_video_event(out)` → 汇报审阅标记；
+- 界面：侧栏「视频审阅」→ 审阅（播放器 + 同步转写）、总览（Gantt + 章节）、库（缩略图、搜索、标签、对比、队列、回收站）、摄像头。
+
+## 摄像头（Windows，显式开启）
+
+```bash
+pip install -r camera/requirements.txt
+python camera/camera-monitor.py --device "video=Your Camera"
+```
+
+bundle 注册三个工具：`camera_state`（即时结构化状态）、`camera_wait`（阻塞等待运动/画面/主体事件）、`camera_snapshot`（抓帧路径，配合 `read_image`）。只有用户显式开启才采集，画面留在本地。
+
+## 配置
+
+| 环境变量 / bundle 配置 | 含义 |
+|---|---|
+| `DSH_EVENT_VIDEO_HOME` / `dataHome` | 数据根目录（记录、缓存、摄像头），默认 `~/event-video` |
+| `DSH_EVENT_VIDEO_PYTHON` / `pythonPath` | 装了 `event-build` 的解释器 |
+| `DSH_EVENT_VIDEO_WHISPER` / `whisperModel` | 本地 faster-whisper 模型目录 |
+| `DSH_EVENT_VIDEO_CAMERA_DEVICE` / `cameraDevice` | ffmpeg dshow 设备 |
+| `DSH_EVENT_VIDEO_ROOTS` / `extraRoots` | 额外允许的媒体根目录（`;` 分隔） |
+
+## 审阅标记
+
+`review` 是确定性的，每次构建都会跑，不额外调用模型。它会标记：
+
+- 完整性校验未通过；
+- OCR 把 URL 里的 `=` / `&` 读丢（地址栏识别真实存在的失败模式）；
+- 完全没有标签的状态；
+- ≥60 秒的语音缺口；
+- 动作对齐弱、语音滞后过大；
+- 章节短于 30 秒或长于 300 秒。
+
+构建工具的摘要会带上同一块内容，模型可以在同一轮回答里汇报。
+
+## 已知限制
+
+- 只支持 mp4；章节边界是字符 bigram 启发式（粗但稳定）。
+- 注意力是排序代理，不是校准过的概率。
+- 摄像头采集仅限 Windows/DirectShow。
+- 构建队列在内存中：重启 DSH 会丢队列（记录仍在磁盘）。
+- OCR 可能读错 URL 标点；审阅会标记，但不会自动纠正。
+
+## 参与贡献
+
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。提交 PR 前跑 `pytest -q engine/tests` 和 Node 语法检查。
+
+## License
+
+MIT © 2026 xinghuobk

@@ -1,3 +1,5 @@
+> **Every second, accounted for. 每一秒，都有据可查。** See the [project README](../README.md) for the full introduction.
+
 # event-build
 
 把一段视频变成**可校验的事件记录**：画面切成状态与转移，语音合并成语义词元，两边按时间戳对齐，输出带锚点的事件 JSON 与四道校验。
