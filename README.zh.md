@@ -142,7 +142,7 @@ pip install -r camera/requirements.txt`n# 首次：下载 MediaPipe 手/脸模�
 python camera/camera-monitor.py --device "video=Your Camera"
 ```
 
-监控还会加载本地 MediaPipe 模型（`hand_landmarker.task`、`face_landmarker.task`），产出 **手势/挥手/微笑/皱眉/人脸出现/离开** 事件，并支持个人中性基线校准（`camera_calibrate`）与阈值反馈（`camera_feedback`）。bundle 注册：`camera_state`（即时结构化状态）、`camera_wait`（阻塞等待运动/画面/主体事件）、`camera_snapshot`（抓帧路径，配合 `read_image`）。只有用户显式开启才采集，画面留在本地。面板预览走本地 MJPEG 流（`/camera/stream`），由监控的 5Hz 帧驱动。
+监控还会加载本地 MediaPipe 模型（`hand_landmarker.task`、`face_landmarker.task`），产出 **手势/挥手/微笑/皱眉/人脸出现/离开** 事件，并支持个人中性基线校准（`camera_calibrate`）与阈值反馈（`camera_feedback`）。bundle 注册：`camera_state`（即时结构化状态）、`camera_wait`（阻塞等待运动/画面/主体事件）、`camera_snapshot`（抓帧路径，配合 `read_image`）。只有用户显式开启才采集，画面留在本地。面板预览走本地 MJPEG 流（`/camera/stream`）；采集 640x480@15fps（分析降到 320x240），`latest.jpg` 每帧刷新。新增身体动作事件：`both_hands_up` / `arms_crossed` / `hands_on_hips`（`pose_action`）。
 
 ## 配置
 
@@ -152,7 +152,7 @@ python camera/camera-monitor.py --device "video=Your Camera"
 | `DSH_EVENT_VIDEO_PYTHON` / `pythonPath` | 装了 `event-build` 的解释器 |
 | `DSH_EVENT_VIDEO_WHISPER` / `whisperModel` | 本地 faster-whisper 模型目录 |
 | `DSH_EVENT_VIDEO_CAMERA_DEVICE` / `cameraDevice` | ffmpeg dshow 设备 |
-| `DSH_EVENT_VIDEO_ROOTS` / `extraRoots` | 额外允许的媒体根目录（`;` 分隔） |`n| `DSH_EVENT_VIDEO_VLM_ENDPOINT` / `vlmEndpoint` | Ollama `/api/chat` 或 OpenAI 兼容 URL |`n| `DSH_EVENT_VIDEO_VLM_MODEL` / `vlmModel` | VLM 模型名（如 qwen2.5vl） |`n| `DSH_EVENT_VIDEO_MEDIAPIPE_DIR` / `mediapipeDir` | 手/脸 `.task` 模型目录（默认 `<home>/models/mediapipe`） |`n| `DSH_EVENT_VIDEO_CAMERA_SIGNALS` / `enableCameraSignals` | `0`/false 关闭手势与表情事件 |`n| `DSH_EVENT_VIDEO_VOICE` / `enableVoice` | `0`/false 关闭语音与语音反应 |`n| `DSH_EVENT_VIDEO_TTS_COMMAND` / `ttsCommand`（+`ttsArgs`）/ `ttsEndpoint` | 本地 TTS 可执行文件或 OpenAI 兼容语音 URL |
+| `DSH_EVENT_VIDEO_ROOTS` / `extraRoots` | 额外允许的媒体根目录（`;` 分隔） |`n| `DSH_EVENT_VIDEO_VLM_ENDPOINT` / `vlmEndpoint` | Ollama `/api/chat` 或 OpenAI 兼容 URL |`n| `DSH_EVENT_VIDEO_VLM_MODEL` / `vlmModel` | VLM 模型名（如 qwen2.5vl） |`n| `DSH_EVENT_VIDEO_MEDIAPIPE_DIR` / `mediapipeDir` | 手/脸 `.task` 模型目录（默认 `<home>/models/mediapipe`） |`n| `DSH_EVENT_VIDEO_CAMERA_SIGNALS` / `enableCameraSignals` | `0`/false 关闭手势与表情事件 |`n| `DSH_EVENT_VIDEO_CAMERA_SIZE` | 采集分辨率，默认 `640x480` |`n| `DSH_EVENT_VIDEO_VOICE` / `enableVoice` | `0`/false 关闭语音与语音反应 |`n| `DSH_EVENT_VIDEO_TTS_COMMAND` / `ttsCommand`（+`ttsArgs`）/ `ttsEndpoint` | 本地 TTS 可执行文件或 OpenAI 兼容语音 URL |
 
 ## 审阅标记
 

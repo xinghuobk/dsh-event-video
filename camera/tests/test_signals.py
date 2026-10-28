@@ -12,6 +12,7 @@ from signals import (  # noqa: E402
     baseline_delta,
     classify_expression,
     classify_gesture,
+    classify_pose,
     face_metrics,
     finger_states,
 )
@@ -89,3 +90,46 @@ def test_face_metrics_and_expression():
     delta = baseline_delta(metrics, {"smile": 0.2, "brow": 0.1})
     assert delta["smile"] == 0.5
     assert delta["brow"] == 0.0
+
+def make_pose(overrides=None):
+    points = [SimpleNamespace(x=0.5, y=0.6, visibility=1.0) for _ in range(33)]
+    points[11] = SimpleNamespace(x=0.4, y=0.4, visibility=1.0)
+    points[12] = SimpleNamespace(x=0.6, y=0.4, visibility=1.0)
+    points[13] = SimpleNamespace(x=0.3, y=0.52, visibility=1.0)
+    points[14] = SimpleNamespace(x=0.7, y=0.52, visibility=1.0)
+    points[15] = SimpleNamespace(x=0.25, y=0.55, visibility=1.0)
+    points[16] = SimpleNamespace(x=0.75, y=0.55, visibility=1.0)
+    points[23] = SimpleNamespace(x=0.42, y=0.75, visibility=1.0)
+    points[24] = SimpleNamespace(x=0.58, y=0.75, visibility=1.0)
+    for index, value in (overrides or {}).items():
+        points[index] = value
+    return points
+
+
+def test_classify_pose_actions():
+    neutral = make_pose()
+    assert classify_pose(neutral) is None
+
+    both_up = make_pose({
+        15: SimpleNamespace(x=0.35, y=0.2, visibility=1.0),
+        16: SimpleNamespace(x=0.65, y=0.2, visibility=1.0),
+    })
+    assert classify_pose(both_up) == "both_hands_up"
+
+    crossed = make_pose({
+        15: SimpleNamespace(x=0.55, y=0.5, visibility=1.0),
+        16: SimpleNamespace(x=0.45, y=0.5, visibility=1.0),
+    })
+    assert classify_pose(crossed) == "arms_crossed"
+
+    hips = make_pose({
+        15: SimpleNamespace(x=0.42, y=0.74, visibility=1.0),
+        16: SimpleNamespace(x=0.58, y=0.74, visibility=1.0),
+    })
+    assert classify_pose(hips) == "hands_on_hips"
+
+    hidden = make_pose({
+        15: SimpleNamespace(x=0.35, y=0.2, visibility=0.0),
+        16: SimpleNamespace(x=0.65, y=0.2, visibility=0.0),
+    })
+    assert classify_pose(hidden) is None

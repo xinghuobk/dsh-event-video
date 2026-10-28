@@ -102,9 +102,9 @@ def face_metrics(blendshapes) -> dict:
 
 
 def classify_expression(metrics: dict, thresholds: dict) -> str:
-    if metrics.get("smile", 0.0) >= thresholds.get("smile", 0.35):
+    if metrics.get("smile", 0.0) >= thresholds.get("smile", 0.22):
         return "smile"
-    if metrics.get("brow", 0.0) >= thresholds.get("brow", 0.4):
+    if metrics.get("brow", 0.0) >= thresholds.get("brow", 0.35):
         return "brow_down"
     if metrics.get("blink", 0.0) >= thresholds.get("blink", 0.7):
         return "eyes_closed"
@@ -116,3 +116,44 @@ def baseline_delta(metrics: dict, baseline: dict) -> dict:
         key: round(float(metrics.get(key, 0.0)) - float(baseline.get(key, 0.0)), 3)
         for key in ("smile", "brow")
     }
+
+
+# Pose landmark indices (MediaPipe Pose, 33 points).
+NOSE = 0
+LEFT_SHOULDER, RIGHT_SHOULDER = 11, 12
+LEFT_ELBOW, RIGHT_ELBOW = 13, 14
+LEFT_WRIST, RIGHT_WRIST = 15, 16
+LEFT_HIP, RIGHT_HIP = 23, 24
+
+
+def _visible(landmark) -> bool:
+    return float(getattr(landmark, "visibility", 1.0)) >= 0.5
+
+
+def classify_pose(landmarks) -> str | None:
+    """Simple body actions from one pose: both_hands_up / arms_crossed / hands_on_hips."""
+    if not landmarks or len(landmarks) < 25:
+        return None
+    left_wrist, right_wrist = landmarks[LEFT_WRIST], landmarks[RIGHT_WRIST]
+    left_shoulder, right_shoulder = landmarks[LEFT_SHOULDER], landmarks[RIGHT_SHOULDER]
+    left_elbow, right_elbow = landmarks[LEFT_ELBOW], landmarks[RIGHT_ELBOW]
+    left_hip, right_hip = landmarks[LEFT_HIP], landmarks[RIGHT_HIP]
+    if not all(_visible(point) for point in
+               (left_wrist, right_wrist, left_shoulder, right_shoulder, left_elbow, right_elbow)):
+        return None
+
+    shoulders_top = min(left_shoulder.y, right_shoulder.y)
+    if (left_wrist.y < shoulders_top - 0.05 and right_wrist.y < shoulders_top - 0.05
+            and left_wrist.y < left_elbow.y and right_wrist.y < right_elbow.y):
+        return "both_hands_up"
+
+    if (_distance(left_wrist, right_shoulder) < 0.18
+            and _distance(right_wrist, left_shoulder) < 0.18
+            and _distance(left_wrist, right_wrist) < 0.18):
+        return "arms_crossed"
+
+    if (_visible(left_hip) and _visible(right_hip)
+            and _distance(left_wrist, left_hip) < 0.12
+            and _distance(right_wrist, right_hip) < 0.12):
+        return "hands_on_hips"
+    return None

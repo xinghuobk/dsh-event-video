@@ -27,6 +27,8 @@ _parser.add_argument("--device", default=os.environ.get("DSH_EVENT_VIDEO_CAMERA_
 _parser.add_argument("--model-dir", default=os.environ.get("DSH_EVENT_VIDEO_MEDIAPIPE_DIR", ""),
                      help="directory holding hand_landmarker.task and face_landmarker.task")
 _parser.add_argument("--signals", default="1", help="1/0: enable gesture and face signals")
+_parser.add_argument("--capture-size", default=os.environ.get("DSH_EVENT_VIDEO_CAMERA_SIZE", "640x480"),
+                     help="capture resolution WxH (analysis always runs at 320x240)")
 _parser.add_argument("--calibrate", type=float, default=0.0,
                      help="seconds of neutral-face calibration before signal events")
 _args = _parser.parse_args()
@@ -49,6 +51,7 @@ try:
         baseline_delta,
         classify_expression,
         classify_gesture,
+        classify_pose,
         face_metrics,
     )
 except Exception as _signals_error:  # noqa: BLE001 - signals are optional
@@ -102,10 +105,16 @@ log(f"pid ok {os.getpid()} cwd={os.getcwd()} path_has_ffmpeg={any((Path(p) / 'ff
 atexit.register(lambda: PID_FILE.unlink(missing_ok=True))
 
 DEVICE = _args.device
-W, H, FPS = 320, 240, 15
+try:
+    W, H = (int(part) for part in str(_args.capture_size).lower().split("x", 1))
+except ValueError:
+    W, H = 640, 480
+ANALYSIS_W, ANALYSIS_H = 320, 240
+FPS = 15
 PROCESS_EVERY = 3
 PROC_FPS = FPS // PROCESS_EVERY
 FRAME_BYTES = W * H * 3
+PREVIEW_EVERY = 1
 COOLDOWN = 1.2
 MOTION_ON_RATIO = 0.012
 MOTION_OFF_SECONDS = 1.4
@@ -145,6 +154,7 @@ except (OSError, ValueError, TypeError):
 
 HAND_LANDMARKER = None
 FACE_LANDMARKER = None
+POSE_LANDMARKER = None
 MP_IMAGE = None
 if SIGNALS_ENABLED:
     try:
@@ -154,6 +164,7 @@ if SIGNALS_ENABLED:
 
         _hand_model = MODEL_DIR / "hand_landmarker.task"
         _face_model = MODEL_DIR / "face_landmarker.task"
+        _pose_model = MODEL_DIR / "pose_landmarker.task"
         if _hand_model.exists() and _face_model.exists():
             HAND_LANDMARKER = _mp_vision.HandLandmarker.create_from_options(
                 _mp_vision.HandLandmarkerOptions(
@@ -166,11 +177,20 @@ if SIGNALS_ENABLED:
                     output_face_blendshapes=True))
             MP_IMAGE = (_MPImage, _MPImageFormat)
             log("signals enabled")
+            if _pose_model.exists():
+                POSE_LANDMARKER = _mp_vision.PoseLandmarker.create_from_options(
+                    _mp_vision.PoseLandmarkerOptions(
+                        base_options=_mp_python.BaseOptions(model_asset_path=str(_pose_model)),
+                        running_mode=_mp_vision.RunningMode.VIDEO, num_poses=1))
+                log("pose actions enabled")
+            else:
+                log(f"pose model missing in {MODEL_DIR}")
         else:
             log(f"signals models missing in {MODEL_DIR}")
     except Exception as _signals_init_error:  # noqa: BLE001 - optional capability
         log(f"signals init failed: {_signals_init_error}")
-state["signals"] = {"enabled": bool(HAND_LANDMARKER and FACE_LANDMARKER)}
+state["signals"] = {"enabled": bool(HAND_LANDMARKER and FACE_LANDMARKER),
+                    "pose": bool(POSE_LANDMARKER)}
 
 
 def write_state() -> None:
@@ -234,6 +254,8 @@ def run_capture() -> None:
     last_expression = 0.0
     last_gesture = 0.0
     last_wave = 0.0
+    last_pose = 0.0
+    pose_stabilizer = GestureStabilizer(need=3) if SIGNALS_ENABLED else None
     last_profile_check = 0.0
     face_on = False
     try:
@@ -245,16 +267,20 @@ def run_capture() -> None:
                 break
             frame = np.frombuffer(buf, dtype=np.uint8).reshape(H, W, 3)
             if raw_no == 0:
-                log("first frame")
+                log(f"first frame {W}x{H}")
                 state["capturing"] = True
             raw_no += 1
             now = time.time()
-            if now - latest_saved > 0.2:
+            if raw_no % PREVIEW_EVERY == 0:
                 cv2.imwrite(str(ROOT / "latest.jpg"), frame)
                 latest_saved = now
             if raw_no % PROCESS_EVERY != 0:
                 continue
-            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            if (W, H) == (ANALYSIS_W, ANALYSIS_H):
+                analysis = frame
+            else:
+                analysis = cv2.resize(frame, (ANALYSIS_W, ANALYSIS_H), interpolation=cv2.INTER_AREA)
+            gray = cv2.cvtColor(analysis, cv2.COLOR_RGB2GRAY)
             brightness = float(gray.mean())
             frame_no += 1
 
@@ -267,6 +293,9 @@ def run_capture() -> None:
                     ys, xs = np.nonzero(mask)
                     if len(xs) > 0:
                         bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+                        if (W, H) != (ANALYSIS_W, ANALYSIS_H):
+                            sx, sy = W / ANALYSIS_W, H / ANALYSIS_H
+                            bbox = [int(bbox[0] * sx), int(bbox[1] * sy), int(bbox[2] * sx), int(bbox[3] * sy)]
             prev_gray = gray
 
             hist = cv2.calcHist([gray], [0], None, [32], [0, 256])
@@ -295,9 +324,9 @@ def run_capture() -> None:
                 last_emit = now
 
             if frame_no % PROC_FPS == 0:
-                red = frame[:, :, 0].astype(np.float32)
-                green = frame[:, :, 1].astype(np.float32)
-                blue = frame[:, :, 2].astype(np.float32)
+                red = analysis[:, :, 0].astype(np.float32)
+                green = analysis[:, :, 1].astype(np.float32)
+                blue = analysis[:, :, 2].astype(np.float32)
                 luma = 0.299 * red + 0.587 * green + 0.114 * blue
                 cr = (red - luma) * 0.713 + 128.0
                 cb = (blue - luma) * 0.564 + 128.0
@@ -318,9 +347,10 @@ def run_capture() -> None:
                 now_ms = int(now * 1000)
                 signals = {"enabled": True, "face": False, "hand": False, "gesture": None,
                            "smile": None, "brow": None, "expression": None, "wave": False,
-                           "calibrating": calibrate_left > 0}
+                           "pose": None, "calibrating": calibrate_left > 0}
+                mp_image = None
                 try:
-                    mp_image = MP_IMAGE[0](image_format=MP_IMAGE[1].SRGB, data=np.ascontiguousarray(frame))
+                    mp_image = MP_IMAGE[0](image_format=MP_IMAGE[1].SRGB, data=np.ascontiguousarray(analysis))
                     hand_result = HAND_LANDMARKER.detect_for_video(mp_image, now_ms)
                     face_result = FACE_LANDMARKER.detect_for_video(mp_image, now_ms)
                 except Exception as signal_error:  # noqa: BLE001 - keep the monitor alive
@@ -396,6 +426,20 @@ def run_capture() -> None:
                         if wave_detector.update(now, wrist_x, True) and now - last_wave > COOLDOWN * 3:
                             emit("wave", frame, {"hands": 1})
                             last_wave = now
+
+                if POSE_LANDMARKER is not None and mp_image is not None:
+                    try:
+                        pose_result = POSE_LANDMARKER.detect_for_video(mp_image, now_ms)
+                    except Exception as pose_error:  # noqa: BLE001 - keep the monitor alive
+                        pose_result = None
+                        log(f"pose inference failed: {pose_error}")
+                    if pose_result is not None and pose_result.pose_landmarks:
+                        action = classify_pose(pose_result.pose_landmarks[0])
+                        signals["pose"] = action
+                        stable_pose = pose_stabilizer.update(action or "unknown") if pose_stabilizer else None
+                        if stable_pose and now - last_pose > COOLDOWN * 2:
+                            emit("pose_action", frame, {"action": stable_pose})
+                            last_pose = now
                 state["signals"] = signals
 
             state["ts"] = now

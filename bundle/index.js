@@ -1990,7 +1990,7 @@ async function serveCameraStream(req, res) {
       /* no frame yet; keep the stream open */
     }
   }
-  timer = setInterval(pushFrame, 100)
+  timer = setInterval(pushFrame, 60)
   await pushFrame()
 }
 
@@ -2520,7 +2520,7 @@ async function cameraVoiceReact(options = {}) {
   if (!VOICE_ENABLED) throw new Error('voice is disabled')
   const kinds = Array.isArray(options.kinds) && options.kinds.length > 0
     ? options.kinds.map(String)
-    : ['wave', 'gesture', 'face_present', 'smile']
+    : ['wave', 'gesture', 'pose_action', 'face_present', 'smile']
   const timeoutS = Math.max(1, Math.min(60, Number(options.timeoutS) || 15))
   const waited = await waitCameraEvent(kinds, timeoutS * 1000)
   if (!waited.event) return { ok: false, timedOut: true, state: waited.state }
