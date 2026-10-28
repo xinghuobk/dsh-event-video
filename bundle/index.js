@@ -628,13 +628,85 @@ async function readCameraEvents(limit = 20) {
   }
 }
 
+let cameraLog = ''
+
+async function killCameraOrphans() {
+  try {
+    const raw = await fs.readFile(join(CAMERA_DIR, 'monitor.pid'), 'utf8')
+    const pid = Number.parseInt(raw.trim(), 10)
+    if (pid > 0) {
+      try { process.kill(pid) } catch { /* already gone */ }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 400))
+    }
+  } catch {
+    /* no pid file */
+  }
+  await fs.rm(join(CAMERA_DIR, 'monitor.pid'), { force: true })
+  await new Promise((resolveKill) => {
+    const script = "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -and $_.CommandLine -like '*camera-monitor.py*') -or ($_.Name -eq 'ffmpeg.exe' -and $_.CommandLine -like '*dshow*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true, stdio: 'ignore' })
+    child.on('close', resolveKill)
+    child.on('error', resolveKill)
+  })
+}
+
 async function startCamera() {
   if (cameraChild !== null) return readCameraState()
   await fs.mkdir(CAMERA_DIR, { recursive: true })
   await fs.rm(join(CAMERA_DIR, 'stop.flag'), { force: true })
-  cameraChild = spawn(PYTHON, [CAMERA_SCRIPT, '--home', CAMERA_DIR, '--device', CAMERA_DEVICE], { windowsHide: true, stdio: 'ignore' })
-  cameraChild.on('close', () => { cameraChild = null })
-  return readCameraState()
+  await killCameraOrphans()
+  cameraLog = ''
+  const child = spawn(PYTHON, [CAMERA_SCRIPT, '--camera-dir', CAMERA_DIR, '--device', CAMERA_DEVICE],
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  cameraChild = child
+  const collect = (chunk) => { cameraLog = (cameraLog + String(chunk)).slice(-4000) }
+  child.stdout.on('data', collect)
+  child.stderr.on('data', collect)
+  child.on('error', (error) => {
+    cameraLog += `\nspawn error: ${error.message}`
+    if (cameraChild === child) cameraChild = null
+  })
+  child.on('close', (code) => {
+    if (cameraChild === child) cameraChild = null
+    cameraLog += `\nexit ${code}`
+  })
+
+  // ffmpeg can take several seconds to open the dshow device; poll for the first fresh state.
+  const deadline = Date.now() + 10000
+  let state = await readCameraState()
+  let fresh = false
+  while (Date.now() < deadline) {
+    state = await readCameraState()
+    fresh = typeof state.ageMs === 'number' && state.ageMs < 3000
+    if (fresh && child.exitCode === null) break
+    if (child.exitCode !== null) break
+    await new Promise((resolveWait) => setTimeout(resolveWait, 400))
+  }
+  const alive = cameraChild === child && child.exitCode === null
+  if (!alive || !fresh) {
+    const detail = cameraLog.trim().split(/\r?\n/).filter(Boolean).slice(-8).join(' | ')
+      || 'monitor did not produce a frame within 10s'
+    try {
+      await fs.writeFile(join(CAMERA_DIR, 'monitor-start.log'), JSON.stringify({
+        when: new Date().toISOString(),
+        python: PYTHON,
+        script: CAMERA_SCRIPT,
+        device: CAMERA_DEVICE,
+        cameraDir: CAMERA_DIR,
+        cwd: process.cwd(),
+        path: process.env.PATH,
+        exitCode: child.exitCode,
+        log: cameraLog,
+      }, null, 1))
+    } catch {
+      /* diagnostics are best-effort */
+    }
+    try { child.kill() } catch { /* already exited */ }
+    cameraChild = null
+    return { ...state, running: false, monitor: false, startError: detail }
+  }
+  return state
 }
 
 async function stopCamera() {
@@ -648,10 +720,22 @@ async function stopCamera() {
     cameraChild = null
   }
   await fs.rm(join(CAMERA_DIR, 'stop.flag'), { force: true })
+  await killCameraOrphans()
   return { running: false }
 }
 
 async function cameraSnapshot() {
+  const latest = join(CAMERA_DIR, 'latest.jpg')
+  try {
+    const stat = await fs.stat(latest)
+    if (Date.now() - stat.mtimeMs < 2000) {
+      const path = join(CAMERA_DIR, `snapshot-${Date.now()}.jpg`)
+      await fs.copyFile(latest, path)
+      return { ok: true, path, source: 'monitor' }
+    }
+  } catch {
+    /* no live frame; fall back to ffmpeg below */
+  }
   const path = join(CAMERA_DIR, `snapshot-${Date.now()}.jpg`)
   const code = await new Promise((resolveSnap) => {
     const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'dshow',
@@ -660,7 +744,7 @@ async function cameraSnapshot() {
     child.on('close', (value) => resolveSnap(value ?? -1))
     child.on('error', () => resolveSnap(-1))
   })
-  return { ok: code === 0, path: code === 0 ? path : null }
+  return { ok: code === 0, path: code === 0 ? path : null, source: 'ffmpeg' }
 }
 
 async function waitCameraEvent(kinds, timeoutMs) {
@@ -1013,6 +1097,31 @@ function handler(req, res) {
     }
     if (route === '/camera/stop' && req.method === 'POST') {
       sendJson(res, 200, await stopCamera())
+      return
+    }
+    if (route === '/camera/debug' && req.method === 'GET') {
+      const mode = (url.searchParams.get('mode') || 'python').toLowerCase()
+      const args = mode === 'monitor'
+        ? [CAMERA_SCRIPT, '--camera-dir', CAMERA_DIR, '--device', CAMERA_DEVICE]
+        : ['-c', 'import sys; print(sys.executable); print(sys.version)']
+      const result = await new Promise((resolveDebug) => {
+        const child = spawn(PYTHON, args, { windowsHide: true })
+        let stdout = ''
+        let stderr = ''
+        let settled = false
+        const finish = (value) => { if (!settled) { settled = true; resolveDebug(value) } }
+        child.stdout.on('data', (chunk) => { stdout += chunk })
+        child.stderr.on('data', (chunk) => { stderr += chunk })
+        child.on('error', (error) => finish({ error: String(error), stdout, stderr }))
+        child.on('close', (code) => finish({ code, stdout, stderr }))
+        if (mode === 'monitor') {
+          setTimeout(() => {
+            try { child.kill() } catch { /* gone */ }
+            finish({ killedAfterMs: 6000, alive: child.exitCode === null, stdout, stderr })
+          }, 6000)
+        }
+      })
+      sendJson(res, 200, { python: PYTHON, script: CAMERA_SCRIPT, args, cwd: process.cwd(), result })
       return
     }
     if (route === '/camera/snapshot' && req.method === 'POST') {

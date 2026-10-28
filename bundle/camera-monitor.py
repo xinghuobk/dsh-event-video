@@ -6,9 +6,11 @@ Runs at ~5 fps analysis on a 15 fps DirectShow stream (Windows). Writes under
   camera/state.json, camera/events.jsonl, camera/events/*.jpg, camera/latest.jpg
 """
 import argparse
+import atexit
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -17,15 +19,48 @@ import numpy as np
 
 _parser = argparse.ArgumentParser(description="Reflex camera monitor")
 _parser.add_argument("--home", default=os.environ.get("DSH_EVENT_VIDEO_HOME", str(Path.home() / "event-video")),
-                     help="data home directory")
+                     help="data home directory (camera dir defaults to <home>/camera)")
+_parser.add_argument("--camera-dir", default=os.environ.get("DSH_EVENT_VIDEO_CAMERA_DIR", ""),
+                     help="absolute camera directory; overrides <home>/camera")
 _parser.add_argument("--device", default=os.environ.get("DSH_EVENT_VIDEO_CAMERA_DEVICE", "video=Default"),
                      help="ffmpeg dshow device spec, e.g. 'video=HD Webcam'")
 _args = _parser.parse_args()
 
-ROOT = Path(_args.home).expanduser() / "camera"
+ROOT = Path(_args.camera_dir).expanduser() if _args.camera_dir else Path(_args.home).expanduser() / "camera"
 EVENTS_DIR = ROOT / "events"
 ROOT.mkdir(parents=True, exist_ok=True)
 EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+PID_FILE = ROOT / "monitor.pid"
+LOG_FILE = ROOT / "monitor.log"
+
+
+def log(message: str) -> None:
+    try:
+        with LOG_FILE.open("a", encoding="utf-8") as handle:
+            handle.write(f"{time.strftime('%H:%M:%S')} {message}\n")
+    except OSError:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+try:
+    _existing = int(PID_FILE.read_text(encoding="utf-8").strip())
+except (OSError, ValueError):
+    _existing = None
+if _existing and _existing != os.getpid() and _pid_alive(_existing):
+    print(f"camera monitor already running (pid {_existing})", file=sys.stderr)
+    sys.exit(1)
+PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+log(f"pid ok {os.getpid()} cwd={os.getcwd()} path_has_ffmpeg={any((Path(p) / 'ffmpeg.exe').exists() for p in os.environ.get('PATH', '').split(os.pathsep) if p)}")
+atexit.register(lambda: PID_FILE.unlink(missing_ok=True))
 
 DEVICE = _args.device
 W, H, FPS = 320, 240, 15
@@ -82,13 +117,19 @@ def emit(kind: str, frame: np.ndarray, detail: dict) -> None:
 
 
 def main() -> None:
-    proc = subprocess.Popen(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "dshow",
-         "-framerate", str(FPS), "-video_size", f"{W}x{H}", "-i", DEVICE,
-         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        bufsize=FRAME_BYTES * 4,
-    )
+    log(f"ffmpeg start device={DEVICE}")
+    try:
+        proc = subprocess.Popen(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "dshow",
+             "-framerate", str(FPS), "-video_size", f"{W}x{H}", "-i", DEVICE,
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            bufsize=FRAME_BYTES * 4,
+        )
+    except Exception as error:  # noqa: BLE001 - surface startup failure
+        log(f"ffmpeg spawn failed: {error}")
+        raise
+    log(f"ffmpeg pid={proc.pid}")
     prev_gray = None
     hist_ref = None
     motion_since = 0.0
@@ -102,9 +143,12 @@ def main() -> None:
         while not stop_file.exists():
             buf = proc.stdout.read(FRAME_BYTES)
             if not buf or len(buf) < FRAME_BYTES:
+                log("ffmpeg stream ended")
                 state["running"] = False
                 break
             frame = np.frombuffer(buf, dtype=np.uint8).reshape(H, W, 3)
+            if raw_no == 0:
+                log("first frame")
             raw_no += 1
             now = time.time()
             if now - latest_saved > 1.0:
