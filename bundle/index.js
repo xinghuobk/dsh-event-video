@@ -20,6 +20,7 @@ let DEFAULT_WHISPER = ''
 let CAMERA_DEVICE = 'video=Default'
 let ROOTS = []
 let ANNOTATIONS_ENABLED = true
+let WORK_ITEMS_ENABLED = true
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -40,6 +41,7 @@ function configure(config = {}) {
   DEFAULT_WHISPER = config.whisperModel || process.env.DSH_EVENT_VIDEO_WHISPER || ''
   CAMERA_DEVICE = config.cameraDevice || process.env.DSH_EVENT_VIDEO_CAMERA_DEVICE || 'video=Default'
   ANNOTATIONS_ENABLED = config.enableAnnotations !== false && process.env.DSH_EVENT_VIDEO_ANNOTATIONS !== '0'
+  WORK_ITEMS_ENABLED = config.enableWorkItems !== false && process.env.DSH_EVENT_VIDEO_WORK_ITEMS !== '0'
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -285,6 +287,158 @@ function frameNameFor(event, t) {
 
 function annotationsPath(out) {
   return join(out, 'annotations.json')
+}
+
+function normalizeWorkItems(items) {
+  if (!Array.isArray(items)) throw new Error('items must be an array')
+  return items.map((raw, index) => {
+    const title = String(raw.title ?? raw.text ?? '').trim()
+    if (!title) throw new Error(`item ${index + 1} is missing a title`)
+    const priority = ['P0', 'P1', 'P2'].includes(raw.priority) ? raw.priority : 'P1'
+    return {
+      title: title.slice(0, 200),
+      detail: String(raw.detail ?? '').slice(0, 1000),
+      priority,
+      owner: String(raw.owner ?? '').slice(0, 60),
+      t0: Number.isFinite(Number(raw.t0)) ? Number(raw.t0) : null,
+      t1: Number.isFinite(Number(raw.t1)) ? Number(raw.t1) : null,
+      frame: raw.frame ? String(raw.frame) : null,
+      quote: String(raw.quote ?? '').slice(0, 500),
+      acceptance: String(raw.acceptance ?? '').slice(0, 500),
+      source: String(raw.source ?? 'manual').slice(0, 40),
+    }
+  })
+}
+
+async function workItemsFromRecord(out) {
+  const event = await eventFor(out)
+  const annotations = (await readAnnotations(out)).annotations || []
+  const review = event.review || reviewEventRecord(event)
+  const flags = Array.isArray(review.flags) ? review.flags : []
+  const items = []
+  for (const annotation of annotations) {
+    items.push({
+      title: annotation.text,
+      detail: `来自 ${fmtClock(annotation.t0)} 的标注（${annotation.author || 'user'}）`,
+      priority: annotation.kind === 'label' ? 'P2' : 'P1',
+      t0: annotation.t0,
+      t1: annotation.t1,
+      frame: annotation.frame || null,
+      quote: annotation.text,
+      acceptance: `回到 ${fmtClock(annotation.t0)} 核对改动`,
+      source: 'annotation',
+    })
+  }
+  for (const flag of flags) {
+    let anchor = null
+    if (flag.code === 'url_missing_separators') {
+      anchor = (event.states || []).find((state) => state.url_hint && flag.message.includes(state.url_hint)) || null
+    } else if (flag.code === 'chapter_length_outlier') {
+      const seconds = Number((flag.message.match(/(\d+)\s*s/) || [])[1])
+      anchor = (event.chapters || []).find((chapter) => Number.isFinite(seconds) && Math.round(chapter.dwell) === seconds) || null
+    }
+    if (!anchor) {
+      anchor = (event.states || []).reduce((best, state) => {
+        const emphasis = state.attention ? state.attention.emphasis : 0
+        return emphasis > (best ? (best.attention ? best.attention.emphasis : 0) : -1) ? state : best
+      }, null)
+    }
+    const t0 = anchor && Number.isFinite(Number(anchor.t0)) ? Number(anchor.t0) : null
+    items.push({
+      title: `处理审阅标记：${flag.code}`,
+      detail: flag.message,
+      priority: flag.level === 'error' ? 'P0' : 'P1',
+      t0,
+      t1: anchor && Number.isFinite(Number(anchor.t1)) ? Number(anchor.t1) : null,
+      frame: t0 !== null ? frameNameFor(event, t0) : null,
+      quote: flag.message,
+      acceptance: t0 !== null
+        ? `回到 ${fmtClock(t0)} 核对并修复；记录重新构建后不再出现该标记`
+        : '审阅标记消失，记录重新构建后不再出现该标记',
+      source: 'review',
+    })
+  }
+  return items
+}
+
+async function exportWorkItems(out, kind = 'tickets', items = null, options = {}) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const event = await eventFor(out)
+  const title = options.title || out.split(/[\\/]/).pop()
+  let normalized
+  if (Array.isArray(items) && items.length > 0) {
+    normalized = normalizeWorkItems(items)
+  } else if (kind === 'sop') {
+    const chapters = event.chapters || []
+    normalized = chapters.map((chapter, index) => ({
+      title: chapter.url ? `页面：${chapter.url}` : `步骤 ${index + 1}`,
+      detail: chapter.reason === 'url' ? '页面切换点' : '话题段落，按时间顺序复现',
+      priority: 'P1',
+      t0: chapter.t0,
+      t1: chapter.t1,
+      frame: frameNameFor(event, chapter.t0),
+      quote: '',
+      acceptance: `按 ${fmtClock(chapter.t0)}–${fmtClock(chapter.t1)} 复现并核对画面`,
+      source: 'chapter',
+    }))
+  } else {
+    normalized = await workItemsFromRecord(out)
+  }
+  if (normalized.length === 0) {
+    throw new Error('no action items found: add annotations or pass items explicitly')
+  }
+  normalized.sort((a, b) => (a.t0 ?? Number.MAX_SAFE_INTEGER) - (b.t0 ?? Number.MAX_SAFE_INTEGER))
+
+  const formats = Array.isArray(options.formats) && options.formats.length > 0 ? options.formats : ['md', 'csv', 'json']
+  const dir = join(HOME, 'exports', `${kind}-${title.replace(/[\\/:*?"<>|]/g, '_')}-${Date.now()}`)
+  await fs.mkdir(dir, { recursive: true })
+  const files = []
+  if (formats.includes('md')) {
+    const lines = [
+      `# ${kind === 'sop' ? 'SOP' : '工单'}：${title}`,
+      '',
+      `- 来源记录：${out}`,
+      `- 生成时间：${new Date().toISOString()}`,
+      `- 条目数：${normalized.length}`,
+      '',
+    ]
+    if (kind === 'sop') {
+      lines.push('| 步骤 | 时间 | 内容 | 证据帧 | 验收 |', '|---|---|---|---|---|')
+      normalized.forEach((item, index) => {
+        lines.push(`| ${index + 1} | ${fmtClock(item.t0)}–${fmtClock(item.t1)} | ${item.title} ${item.detail} | ${item.frame || '—'} | ${item.acceptance || '—'} |`)
+      })
+    } else {
+      normalized.forEach((item, index) => {
+        lines.push(`## ${index + 1}. [${item.priority}] ${item.title}`, '')
+        if (item.t0 !== null) lines.push(`- 时间：${fmtClock(item.t0)}${item.t1 !== null ? '–' + fmtClock(item.t1) : ''}`)
+        if (item.frame) lines.push(`- 证据帧：${item.frame}`)
+        if (item.detail) lines.push(`- 详情：${item.detail}`)
+        if (item.quote) lines.push(`- 原话：${item.quote}`)
+        lines.push(`- 验收：${item.acceptance || '按证据帧核对改前/改后'}`)
+        lines.push(`- 来源：${item.source}`)
+        lines.push('')
+      })
+    }
+    const target = join(dir, kind === 'sop' ? 'sop.md' : 'tickets.md')
+    await fs.writeFile(target, lines.join('\n'))
+    files.push(target)
+  }
+  if (formats.includes('csv')) {
+    const header = ['title', 'priority', 'time', 'frame', 'detail', 'quote', 'acceptance', 'source']
+    const rows = normalized.map((item) => [
+      item.title, item.priority, item.t0 === null ? '' : fmtClock(item.t0),
+      item.frame || '', item.detail, item.quote, item.acceptance, item.source,
+    ].map(csvEscape).join(','))
+    const target = join(dir, kind === 'sop' ? 'sop.csv' : 'tickets.csv')
+    await fs.writeFile(target, [header.join(','), ...rows].join('\n'))
+    files.push(target)
+  }
+  if (formats.includes('json')) {
+    const target = join(dir, kind === 'sop' ? 'sop.json' : 'tickets.json')
+    await fs.writeFile(target, JSON.stringify({ kind, title, out, generatedAt: new Date().toISOString(), items: normalized }, null, 1))
+    files.push(target)
+  }
+  return { ok: true, kind, dir, files, count: normalized.length }
 }
 
 async function readAnnotations(out) {
@@ -1356,6 +1510,48 @@ async function askVideoLibrary(question, limit = 6) {
   }
 }
 
+const exportWorkItemsTool = {
+  name: 'export_work_items',
+  description: 'Turn a record into tickets or an SOP: export_video_work_items writes tickets.md/csv/json with time, evidence frame and acceptance; kind="sop" writes ordered steps from chapters. Items can be passed explicitly (title/detail/priority/t0/t1/frame/acceptance) or derived from annotations and review flags.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      kind: { type: 'string', enum: ['tickets', 'sop'], description: 'tickets (default) or sop.' },
+      items: {
+        type: 'array',
+        description: 'Optional action items; omit to derive from annotations + review flags (tickets) or chapters (sop).',
+        items: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            title: { type: 'string' },
+            detail: { type: 'string' },
+            priority: { type: 'string' },
+            t0: { type: 'number' },
+            t1: { type: 'number' },
+            frame: { type: 'string' },
+            quote: { type: 'string' },
+            acceptance: { type: 'string' },
+          },
+          required: ['title'],
+        },
+      },
+      formats: { type: 'array', items: { type: 'string' }, description: 'Any of md, csv, json (default all three).' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 30000,
+  async execute(args) {
+    return exportWorkItems(args.out, args.kind || 'tickets', args.items || null, args)
+  },
+}
+
 const annotateTool = {
   name: 'annotate_video_record',
   description: 'Add a timestamped annotation (note or chapter label) to an event record. Stored in the record\'s annotations.json sidecar; event.json is never modified. Returns the new annotation with its frame anchor.',
@@ -1688,6 +1884,19 @@ function handler(req, res) {
         return
       }
     }
+    if (route === '/event-video/work-items' && req.method === 'POST') {
+      if (!WORK_ITEMS_ENABLED) {
+        sendJson(res, 403, { error: 'work items are disabled' })
+        return
+      }
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await exportWorkItems(body.out, body.kind || 'tickets', body.items || null, body))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
     sendJson(res, 404, { error: 'not found' })
   }
   run().catch((error) => sendJson(res, 500, { error: String(error?.message ?? error) }))
@@ -1910,6 +2119,9 @@ export function apply(ctx, config) {
     ctx.effect(() => ctx.tools.register(annotateTool), 'event-video: annotate tool')
     ctx.effect(() => ctx.tools.register(listAnnotationsTool), 'event-video: annotations tool')
   }
+  if (WORK_ITEMS_ENABLED) {
+    ctx.effect(() => ctx.tools.register(exportWorkItemsTool), 'event-video: work items tool')
+  }
   if ((config || {}).enableSearchTool !== false && process.env.DSH_EVENT_VIDEO_SEARCH !== '0') {
     ctx.effect(() => ctx.tools.register(searchLibraryTool), 'event-video: search tool')
     ctx.effect(() => ctx.tools.register(askLibraryTool), 'event-video: ask tool')
@@ -1936,4 +2148,7 @@ export const __test = {
   updateAnnotation,
   deleteAnnotation,
   recordMarkdown,
+  exportWorkItems,
+  workItemsFromRecord,
+  normalizeWorkItems,
 }

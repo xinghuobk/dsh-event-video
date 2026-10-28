@@ -870,6 +870,16 @@ window.__ModuleLoader__.load({
       const event = data ? data.event : null
       const [annotations, setAnnotations] = useState((data && data.annotations) || [])
       useEffect(() => { setAnnotations((data && data.annotations) || []) }, [data])
+      const exportWork = (kind) => {
+        fetch('/event-video/work-items', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, kind }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.dir) window.alert('已导出（' + value.count + ' 条）：' + value.dir)
+          else window.alert(value.error || '导出失败')
+        }).catch(() => window.alert('导出失败'))
+      }
       const addAnnotation = () => {
         const text = window.prompt('标注内容（当前时间点 ' + fmt(time) + '）')
         if (!text) return
@@ -1026,6 +1036,8 @@ window.__ModuleLoader__.load({
           },
         }, '看帧'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: addAnnotation }, '标注'),
+        h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('tickets') }, '工单'),
+        h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, 'SOP'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {

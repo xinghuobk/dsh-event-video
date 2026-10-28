@@ -132,7 +132,7 @@ npm install --install-links --legacy-peer-deps "file:/path/to/dsh-event-video/pl
 **3. 使用**
 
 - 模型工具：`build_video_event(video, transcript | asr, mode?, hi_labels?)` → `review_video_event(out)` → 汇报审阅标记；
-- 时间轴标注：`annotate_video_record(out, t0, text)` / `list_video_annotations(out)` 写入带帧锚点的 `annotations.json`（不改 event.json）；播放器有「标注」按钮和标注列表。`n- 跨库检索：`search_video_library(query)` 返回带时间戳/帧/原话的排序结果；`ask_video_library(question)` 返回证据包并附带引用规范。「汇总」页可搜。`n- 看帧：`read_video_frame(out, t)` 返回该时间点的帧路径 + 画面标签/章节/邻近原话，模型再对路径调用 `read_image` 真正看图（播放器里的 **看帧** 按钮同源）。`n- 导出：`export_video_analysis(out)` 生成 `analysis.md`、`chapters.csv`、`analysis.docx`、`analysis.xlsx` 和原始 `event.json`（写到数据目录 `exports/`）；`summarize_video_analyses()` 一次性返回所有记录的总览（总量、审阅标记分布、跨记录注意力最高段落）；
+- 行动项交付：`export_work_items(out, kind)` 生成 tickets.md/csv/json（来源：标注 + 审阅标记，逐条带时间/帧/验收）或按章节生成 SOP；播放器有 **工单** / **SOP** 按钮。`n- 时间轴标注：`annotate_video_record(out, t0, text)` / `list_video_annotations(out)` 写入带帧锚点的 `annotations.json`（不改 event.json）；播放器有「标注」按钮和标注列表。`n- 跨库检索：`search_video_library(query)` 返回带时间戳/帧/原话的排序结果；`ask_video_library(question)` 返回证据包并附带引用规范。「汇总」页可搜。`n- 看帧：`read_video_frame(out, t)` 返回该时间点的帧路径 + 画面标签/章节/邻近原话，模型再对路径调用 `read_image` 真正看图（播放器里的 **看帧** 按钮同源）。`n- 导出：`export_video_analysis(out)` 生成 `analysis.md`、`chapters.csv`、`analysis.docx`、`analysis.xlsx` 和原始 `event.json`（写到数据目录 `exports/`）；`summarize_video_analyses()` 一次性返回所有记录的总览（总量、审阅标记分布、跨记录注意力最高段落）；
 - 界面：侧栏「视频审阅」→ 审阅（播放器 + 同步转写）、总览（Gantt + 章节）、库（缩略图、搜索、标签、对比、队列、回收站）、汇总（所有分析一屏总览 + 一键导出）、摄像头。
 
 ## 摄像头（Windows，显式开启）
