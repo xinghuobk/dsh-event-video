@@ -86,6 +86,18 @@ const jobs = new Map()
 const pending = []
 let active = 0
 let cameraChild = null
+let cameraDesired = false
+let cameraStarting = false
+let cameraRestartTimer = null
+let cameraRestartAttempts = 0
+
+function logCamera(line) {
+  try {
+    fs.appendFile(join(CAMERA_DIR, 'host-camera.log'), `${new Date().toISOString()} ${line}\n`).catch(() => {})
+  } catch {
+    /* diagnostics are best-effort */
+  }
+}
 
 function insideRoots(path) {
   const full = resolve(path)
@@ -1055,10 +1067,53 @@ async function killCameraOrphans() {
   })
 }
 
+async function externalCameraState() {
+  try {
+    const raw = await fs.readFile(join(CAMERA_DIR, 'monitor.pid'), 'utf8')
+    const pid = Number.parseInt(raw.trim(), 10)
+    if (!pid) return null
+    try { process.kill(pid, 0) } catch { return null }
+    const state = await readCameraState()
+    if (typeof state.ageMs !== 'number' || state.ageMs > 5000) return null
+    return { ...state, monitor: true, adopted: true }
+  } catch {
+    return null
+  }
+}
+
+function scheduleCameraRestart(reason) {
+  if (!cameraDesired || cameraStarting || cameraRestartTimer !== null) return
+  cameraRestartAttempts += 1
+  const delay = Math.min(30000, 1000 * 2 ** Math.min(5, cameraRestartAttempts))
+  logCamera(`monitor exited (${reason}); restart #${cameraRestartAttempts} in ${delay}ms`)
+  cameraRestartTimer = setTimeout(() => {
+    cameraRestartTimer = null
+    if (!cameraDesired || cameraChild !== null) return
+    startCamera({ restart: true }).catch((error) => {
+      logCamera(`restart failed: ${error.message}`)
+      scheduleCameraRestart('start failed')
+    })
+  }, delay)
+}
+
 async function startCamera(options = {}) {
   if (cameraChild !== null) return readCameraState()
   await fs.mkdir(CAMERA_DIR, { recursive: true })
   await fs.rm(join(CAMERA_DIR, 'stop.flag'), { force: true })
+  const adopted = await externalCameraState()
+  if (adopted) {
+    cameraDesired = true
+    await fs.writeFile(join(CAMERA_DIR, 'wanted.flag'), '1')
+    return adopted
+  }
+  cameraDesired = true
+  if (cameraRestartTimer !== null) {
+    clearTimeout(cameraRestartTimer)
+    cameraRestartTimer = null
+  }
+  await fs.writeFile(join(CAMERA_DIR, 'wanted.flag'), '1')
+  cameraStarting = true
+  try {
   await killCameraOrphans()
   cameraLog = ''
   const args = [CAMERA_SCRIPT, '--camera-dir', CAMERA_DIR, '--device', CAMERA_DEVICE,
@@ -1073,10 +1128,12 @@ async function startCamera(options = {}) {
   child.on('error', (error) => {
     cameraLog += `\nspawn error: ${error.message}`
     if (cameraChild === child) cameraChild = null
+    scheduleCameraRestart('spawn error')
   })
   child.on('close', (code) => {
     if (cameraChild === child) cameraChild = null
     cameraLog += `\nexit ${code}`
+    scheduleCameraRestart(`exit ${code}`)
   })
 
   // ffmpeg can take several seconds to open the dshow device; poll for the first fresh state.
@@ -1114,9 +1171,19 @@ async function startCamera(options = {}) {
     return { ...state, running: false, monitor: false, startError: detail }
   }
   return state
+  } finally {
+    cameraStarting = false
+  }
 }
 
 async function stopCamera() {
+  cameraDesired = false
+  cameraRestartAttempts = 0
+  if (cameraRestartTimer !== null) {
+    clearTimeout(cameraRestartTimer)
+    cameraRestartTimer = null
+  }
+  await fs.rm(join(CAMERA_DIR, 'wanted.flag'), { force: true })
   await fs.writeFile(join(CAMERA_DIR, 'stop.flag'), 'stop')
   if (cameraChild !== null) {
     const child = cameraChild
@@ -2566,6 +2633,19 @@ export const inject = ['webServer', 'tools']
 
 export function apply(ctx, config) {
   configure(config || {})
+  try {
+    if (existsSync(join(CAMERA_DIR, 'wanted.flag'))) cameraDesired = true
+  } catch {
+    /* no camera dir yet */
+  }
+  ctx.effect(() => {
+    const timer = setInterval(async () => {
+      if (!cameraDesired || cameraChild !== null || cameraStarting || cameraRestartTimer !== null) return
+      if (await externalCameraState()) return
+      scheduleCameraRestart('watchdog')
+    }, 10000)
+    return () => clearInterval(timer)
+  }, 'event-video: camera watchdog')
   ctx.effect(() => { refreshIndex().catch(() => {}) }, 'event-video: initial index')
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',

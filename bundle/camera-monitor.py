@@ -76,14 +76,28 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-try:
-    _existing = int(PID_FILE.read_text(encoding="utf-8").strip())
-except (OSError, ValueError):
-    _existing = None
-if _existing and _existing != os.getpid() and _pid_alive(_existing):
-    print(f"camera monitor already running (pid {_existing})", file=sys.stderr)
+def _acquire_lock() -> bool:
+    """Atomically claim the monitor pid file; tolerate one stale file."""
+    for _attempt in range(3):
+        try:
+            descriptor = os.open(str(PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(str(os.getpid()))
+            return True
+        except FileExistsError:
+            try:
+                existing = int(PID_FILE.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                existing = None
+            if existing and existing != os.getpid() and _pid_alive(existing):
+                return False
+            PID_FILE.unlink(missing_ok=True)
+    return False
+
+
+if not _acquire_lock():
+    print("camera monitor already running", file=sys.stderr)
     sys.exit(1)
-PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 log(f"pid ok {os.getpid()} cwd={os.getcwd()} path_has_ffmpeg={any((Path(p) / 'ffmpeg.exe').exists() for p in os.environ.get('PATH', '').split(os.pathsep) if p)}")
 atexit.register(lambda: PID_FILE.unlink(missing_ok=True))
 
@@ -111,6 +125,8 @@ state = {
     "lastEvent": None,
     "events": 0,
     "latestFrame": str(ROOT / "latest.jpg"),
+    "capturing": True,
+    "captureRestarts": 0,
 }
 
 events_log = ROOT / "events.jsonl"
@@ -121,6 +137,11 @@ try:
     state["events"] = sum(1 for _ in events_log.open(encoding="utf-8")) if events_log.exists() else 0
 except OSError:
     state["events"] = 0
+try:
+    _previous_state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["frames"] = max(int(state["frames"]), int(_previous_state.get("frames") or 0))
+except (OSError, ValueError, TypeError):
+    pass
 
 HAND_LANDMARKER = None
 FACE_LANDMARKER = None
@@ -170,7 +191,7 @@ def emit(kind: str, frame: np.ndarray, detail: dict) -> None:
     state["lastEvent"] = row
 
 
-def main() -> None:
+def run_capture() -> None:
     log(f"ffmpeg start device={DEVICE}")
     try:
         proc = subprocess.Popen(
@@ -194,7 +215,7 @@ def main() -> None:
     last_motion = 0.0
     last_emit = 0.0
     subject_on = False
-    frame_no = 0
+    frame_no = int(state.get("frames") or 0)
     raw_no = 0
     latest_saved = 0.0
     gesture_stabilizer = GestureStabilizer(need=3) if SIGNALS_ENABLED else None
@@ -220,11 +241,12 @@ def main() -> None:
             buf = proc.stdout.read(FRAME_BYTES)
             if not buf or len(buf) < FRAME_BYTES:
                 log("ffmpeg stream ended")
-                state["running"] = False
+                state["capturing"] = False
                 break
             frame = np.frombuffer(buf, dtype=np.uint8).reshape(H, W, 3)
             if raw_no == 0:
                 log("first frame")
+                state["capturing"] = True
             raw_no += 1
             now = time.time()
             if now - latest_saved > 0.2:
@@ -388,9 +410,44 @@ def main() -> None:
             proc.wait(timeout=2)
         except Exception:
             pass
-        state["running"] = False
+        state["capturing"] = False
         write_state()
 
 
+def main() -> None:
+    """Keep the monitor alive: restart capture if the stream or loop dies."""
+    attempts = 0
+    while not stop_file.exists():
+        try:
+            run_capture()
+            attempts += 1
+        except Exception as error:  # noqa: BLE001 - never lose the monitor to one bad capture
+            log(f"capture loop crashed: {type(error).__name__}: {error}")
+            attempts += 1
+        if stop_file.exists():
+            break
+        state["running"] = True
+        state["capturing"] = False
+        state["captureRestarts"] = attempts
+        write_state()
+        wait_seconds = min(30, 2 * attempts)
+        log(f"capture restart #{attempts} in {wait_seconds}s")
+        for _ in range(int(wait_seconds * 10)):
+            if stop_file.exists():
+                break
+            time.sleep(0.1)
+    state["running"] = False
+    state["capturing"] = False
+    write_state()
+    log("monitor stopped")
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as fatal_error:  # noqa: BLE001 - last-resort diagnostics
+        log(f"monitor fatal: {type(fatal_error).__name__}: {fatal_error}")
+        state["running"] = False
+        state["capturing"] = False
+        write_state()
+        raise
