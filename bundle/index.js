@@ -838,7 +838,13 @@ async function collectSummary() {
   for (const item of records) {
     try {
       const event = JSON.parse(await fs.readFile(join(item.out, 'event.json'), 'utf8'))
-      per.push(recordFromEvent(event, item.out, item.title || item.name || item.dir))
+      const record = recordFromEvent(event, item.out, item.title || item.name || item.dir)
+      try {
+        record.tags = JSON.parse(await fs.readFile(join(item.out, 'review.json'), 'utf8')).tags || []
+      } catch {
+        record.tags = []
+      }
+      per.push(record)
     } catch {
       /* skip unreadable record */
     }

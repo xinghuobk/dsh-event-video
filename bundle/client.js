@@ -1492,6 +1492,9 @@ window.__ModuleLoader__.load({
     function SummaryView({ onOpen }) {
       const [summary, setSummary] = useState(null)
       const [toast, showToast] = useToast()
+      const [tagFilter, setTagFilter] = useState('')
+      const [minDur, setMinDur] = useState('')
+      const [maxDur, setMaxDur] = useState('')
       const load = () => {
         fetch('/event-video/summary').then((r) => r.json()).then(setSummary).catch(() => {})
       }
@@ -1522,7 +1525,23 @@ window.__ModuleLoader__.load({
         }).catch(() => showToast('导出失败'))
       }
       if (!summary) return h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-note' }, '加载汇总…'))
-      const totals = summary.totals || {}
+      const allRecords = summary.records || []
+      const allTags = [...new Set(allRecords.flatMap((record) => record.tags || []))]
+      const filteredRecords = allRecords.filter((record) => {
+        if (tagFilter && !(record.tags || []).includes(tagFilter)) return false
+        if (minDur !== '' && record.duration < Number(minDur)) return false
+        if (maxDur !== '' && record.duration > Number(maxDur)) return false
+        return true
+      })
+      const totals = {
+        records: filteredRecords.length,
+        duration: filteredRecords.reduce((sum, r) => sum + r.duration, 0),
+        chapters: filteredRecords.reduce((sum, r) => sum + r.chapters, 0),
+        states: filteredRecords.reduce((sum, r) => sum + r.states, 0),
+        units: filteredRecords.reduce((sum, r) => sum + r.units, 0),
+        gatesOk: filteredRecords.filter((r) => r.gates).length,
+        flags: filteredRecords.reduce((sum, r) => sum + r.flags.length, 0),
+      }
       const cards = [
         ['记录', totals.records], ['总时长', fmtClock(totals.duration)], ['章节', totals.chapters],
         ['状态', totals.states], ['语元', totals.units],
@@ -1538,7 +1557,7 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dsev-time' }, `${fmtClock(segment.t0)}–${fmtClock(segment.t1)}`),
         h('span', { className: 'dsev-sum-top-title', title: segment.title }, segment.title),
         h('span', { className: 'dsev-num' }, String(Math.round(segment.emphasis)))))
-      const rows = (summary.records || []).map((record) => h('tr', { key: record.out },
+      const rows = filteredRecords.map((record) => h('tr', { key: record.out },
         h('td', null, h('span', { className: 'dsev-url', title: record.title }, record.title)),
         h('td', null, fmtClock(record.duration)),
         h('td', null, String(record.chapters)),
@@ -1558,6 +1577,24 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsev-topbar-actions' },
             h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: exportAll }, '导出总览'),
             h('button', { type: 'button', className: 'dsev-btn', onClick: load }, '刷新'))),
+        h('div', { className: 'dsev-toolbar' },
+          h('span', { className: 'dsev-meta' }, '标签'),
+          h('div', { className: 'dsev-chips' },
+            [['', '全部'], ...allTags.map((tag) => [tag, tag])].map(([value, label]) => h('button', {
+              key: value || 'all',
+              type: 'button',
+              className: 'dsev-chip' + (tagFilter === value ? ' dsev-chip-on' : ''),
+              onClick: () => setTagFilter(value),
+            }, label))),
+          h('input', {
+            className: 'dsev-input', style: { maxWidth: 110 }, type: 'number', placeholder: '最短秒',
+            value: minDur, onChange: (e) => setMinDur(e.target.value),
+          }),
+          h('input', {
+            className: 'dsev-input', style: { maxWidth: 110 }, type: 'number', placeholder: '最长秒',
+            value: maxDur, onChange: (e) => setMaxDur(e.target.value),
+          }),
+          h('span', { className: 'dsev-meta' }, `${filteredRecords.length} / ${allRecords.length} 条`)),
         h('div', { className: 'dsev-sum-grid' }, cards),
         h('div', { className: 'dsev-columns' },
           h('div', null, h('div', { className: 'dsev-card-box' },
