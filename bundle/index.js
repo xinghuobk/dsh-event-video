@@ -772,7 +772,7 @@ function chaptersCsv(event) {
   return [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')
 }
 
-async function exportRecord(out, formats = ['md', 'csv', 'json']) {
+async function exportRecord(out, formats = ['md', 'csv', 'json', 'docx', 'xlsx']) {
   if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
   const event = JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
   let title = out.split(/[\\/]/).pop()
@@ -785,6 +785,7 @@ async function exportRecord(out, formats = ['md', 'csv', 'json']) {
   const dir = join(HOME, 'exports', `${title.replace(/[\\/:*?"<>|]/g, '_')}-${Date.now()}`)
   await fs.mkdir(dir, { recursive: true })
   const files = []
+  const warnings = []
   const wanted = new Set(formats)
   if (wanted.has('json')) {
     const target = join(dir, 'event.json')
@@ -801,7 +802,34 @@ async function exportRecord(out, formats = ['md', 'csv', 'json']) {
     await fs.writeFile(target, chaptersCsv(event))
     files.push(target)
   }
-  return { ok: true, dir, files }
+  const office = ['docx', 'xlsx'].filter((format) => wanted.has(format))
+  if (office.length > 0) {
+    const result = await new Promise((resolveOffice) => {
+      const child = spawn(PYTHON, [
+        '-m', 'event_build.export_office',
+        '--event', join(out, 'event.json'),
+        '--out', dir,
+        '--formats', office.join(','),
+        '--title', title,
+      ], { windowsHide: true })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk) => { stdout += chunk })
+      child.stderr.on('data', (chunk) => { stderr += chunk })
+      child.on('close', (code) => resolveOffice({ code, stdout, stderr }))
+      child.on('error', (error) => resolveOffice({ code: -1, stdout: '', stderr: String(error) }))
+    })
+    if (result.code === 0) {
+      try {
+        files.push(...(JSON.parse(result.stdout.trim() || '{}').files || []))
+      } catch {
+        warnings.push('Word/Excel 导出结果无法解析')
+      }
+    } else {
+      warnings.push('Word/Excel 导出失败（需要 python-docx / openpyxl：pip install -e "engine[office]"）')
+    }
+  }
+  return { ok: true, dir, files, warnings }
 }
 
 async function collectSummary() {
@@ -1081,14 +1109,14 @@ function reviewEventRecord(event) {
 
 const exportTool = {
   name: 'export_video_analysis',
-  description: 'Export the analysis of one event record: analysis.md (readable report with chapters, attention, URLs and review flags), chapters.csv, and the raw event.json. Returns the export directory and file paths. Use after building/reviewing a record when the user wants files.',
+  description: 'Export the analysis of one event record: analysis.md (readable report), chapters.csv, raw event.json, and analysis.docx / analysis.xlsx (deliverable documents). Returns the export directory and file paths. Use after building/reviewing a record when the user wants files.',
   parameters: {
     type: 'object',
     additionalProperties: false,
     required: ['out'],
     properties: {
       out: { type: 'string', description: 'Event record output directory.' },
-      formats: { type: 'array', items: { type: 'string' }, description: 'Any of md, csv, json (default all three).' },
+      formats: { type: 'array', items: { type: 'string' }, description: 'Any of md, csv, json, docx, xlsx (default all five).' },
     },
   },
   output: {
