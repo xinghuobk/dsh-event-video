@@ -1,0 +1,22 @@
+{
+  "record": "D:/agent/video-events/review-test",
+  "stages": [
+    {
+      "id": "describe",
+      "kind": "describe",
+      "model": "gemma3:12b",
+      "frames": [0, 10],
+      "think": false,
+      "prompt": "请用中文客观描述这张截图（1-2 句）：可见的页面区块、可读文字、明显状态。"
+    },
+    {
+      "id": "think",
+      "kind": "describe",
+      "model": "qwen3-vl:8b",
+      "depends_on": ["describe"],
+      "frames": [10],
+      "think": true,
+      "prompt": "请仔细观察并思考，然后用中文给出 2 句结论性描述，不要输出思考过程。"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+ "stages": {
+  "describe": {
+   "status": "done",
+   "model": "gemma3:12b",
+   "think": false,
+   "results": [
+    {
+     "t": 0,
+     "frame": "f_000001.jpg",
+     "model": "gemma3:12b",
+     "think": false,
+     "text": "这张截图显示的是一个网页，页面内容为黑白风格的艺术作品和文字描述。网页标题为“ORIMODO”，页面左侧显示了艺术作品的图像，右侧则有文字内容，描述了艺术灵感来源和品牌理念。",
+     "seconds": 6.3,
+     "cached": false
+    },
+    {
+     "t": 10,
+     "frame": "f_000011.jpg",
+     "model": "gemma3:12b",
+     "think": false,
+     "text": "这张截图显示的是一个电脑屏幕，上面打开了一个网页浏览器（可能是Chrome）。网页上显示着白色的文字“You always gave me a piece of caramel”，旁边还有一个弹窗，内容为“翻译 英语 网页”，并显示了“翻译”和“网页”两个选项。",
+     "seconds": 6.6,
+     "cached": false
+    }
+   ]
+  },
+  "think": {
+   "status": "done",
+   "model": "qwen3-vl:8b",
+   "think": true,
+   "results": [
+    {
+     "t": 10,
+     "frame": "f_000011.jpg",
+     "model": "qwen3-vl:8b",
+     "think": true,
+     "text": "浏览器当前页面为黑色背景，中央显示英文句子“You always gave me a piece of caramel”。  \n页面右上角弹出翻译工具，提示将页面内容翻译为简体中文。",
+     "seconds": 20.7,
+     "cached": false
+    }
+   ]
+  }
+ }
+}
