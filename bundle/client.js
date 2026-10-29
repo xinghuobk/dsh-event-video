@@ -212,7 +212,15 @@ window.__ModuleLoader__.load({
       .dsev-noside .dsev-topbar-wrap { padding: 16px 28px 0; position: relative; z-index: 1; }
       .dsev-noside .dsev-main { width: 100%; }
       .dsev-topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 8px; margin-bottom: 18px; }
-      .dsev-topbar-title { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--dsev-text-2); }
+      .dsev-topbar-title { font-size: 15px; font-weight: 600; letter-spacing: 0.01em; color: var(--dsev-text-1); }
+      .dsev-record-select {
+        height: 30px; max-width: 320px; padding: 0 26px 0 8px;
+        border: 0.5px solid transparent; border-radius: 8px; background: transparent;
+        color: var(--dsev-text-1); font-size: 15px; font-weight: 600; cursor: pointer;
+        appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+        background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px; background-size: 5px 5px; background-repeat: no-repeat;
+      }
+      .dsev-record-select:hover { border-color: var(--dsev-border); background-color: var(--dsev-surface-2); }
       .dsev-topbar-actions { display: flex; gap: 8px; margin-left: auto; }
 
       .dsev-canvas-card {
@@ -371,7 +379,9 @@ window.__ModuleLoader__.load({
       .dsev-review-main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 26px 40px; }
       .dsev-video-wrap { position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 0.5px solid var(--dsev-border); }
       .dsev-video { display: block; width: 100%; max-height: 54vh; background: #000; }
-      .dsev-video-empty { display: flex; align-items: center; justify-content: center; height: 260px; color: var(--dsev-text-3); font-size: 13px; }
+      .dsev-video-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 200px; color: var(--dsev-text-3); font-size: 13px; border: 1px dashed var(--dsev-border); border-radius: 12px; background: var(--dsev-surface-2); }
+      .dsev-video-empty-title { font-size: 14px; font-weight: 600; color: var(--dsev-text-2); }
+      .dsev-video-empty-sub { font-size: 12px; opacity: 0.7; }
       .dsev-controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
       .dsev-progress { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
       .dsev-progress-track { height: 6px; border-radius: 999px; background: rgba(127,127,127,0.18); overflow: hidden; }
@@ -1121,7 +1131,9 @@ window.__ModuleLoader__.load({
           onPause: () => setPlaying(false),
           onLoadedMetadata: () => setTime(videoRef.current ? videoRef.current.currentTime : 0),
         })
-        : h('div', { className: 'dsev-video-empty' }, '这条记录没有关联视频（缺少 review.json）')
+        : h('div', { className: 'dsev-video-empty' },
+          h('div', { className: 'dsev-video-empty-title' }, '这条记录没有关联视频'),
+          h('div', { className: 'dsev-video-empty-sub' }, '仍可查看帧、章节与转写；构建时保留源视频即可播放。'))
 
       const controls = h('div', { className: 'dsev-controls' },
         h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: toggle }, playing ? '暂停' : '播放'),
@@ -1137,12 +1149,12 @@ window.__ModuleLoader__.load({
           },
         }, '看帧'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: addAnnotation }, '标注'),
-        h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('tickets') }, '工单'),
-        h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, 'SOP'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => setShowAiTools((value) => !value) }, showAiTools ? '收起 AI 工具' : 'AI 工具'),
         ...(showAiTools ? [
           h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: describeKeyFrames }, '关键帧思考'),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('tickets') }, '导出工单'),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, '导出 SOP'),
           h('input', {
             className: 'dsev-input',
             style: { maxWidth: 210 },
@@ -1170,7 +1182,7 @@ window.__ModuleLoader__.load({
             if (wrap && wrap.requestFullscreen) wrap.requestFullscreen().catch(() => {})
           },
         }, '全屏'),
-        h('span', { className: 'dsev-meta' }, `${fmt(time)} / ${fmt(span)} · 空格播放 · ←→ 5s · JKL · F 全屏`))
+        h('span', { className: 'dsev-meta', title: '空格播放 · ←→ 5s · JKL · F 全屏' }, `${fmt(time)} / ${fmt(span)}`))
 
       const seekBar = h('div', {
         className: 'dsev-seek',
@@ -1220,7 +1232,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsev-review-columns' },
         h('div', null,
           h('div', { className: 'dsev-video-wrap' }, video),
-          seekBar,
+          src ? seekBar : null,
           controls,
           pipelineState.running || pipelineState.total
             ? h('div', { className: 'dsev-progress' },
@@ -1914,15 +1926,14 @@ window.__ModuleLoader__.load({
           onClick: () => setView(key),
         }, label)))
       const header = h('div', { className: 'dsev-topbar' },
-        h('span', { className: 'dsev-topbar-title' }, active ? (active.title || active.name || active.dir) : '视频审阅'),
         records.length > 0
           ? h('select', {
-            className: 'dsev-select',
+            className: 'dsev-record-select',
             value: activeOut || '',
             onChange: (e) => setActiveOut(e.target.value),
             title: '切换记录',
           }, records.map((r) => h('option', { key: r.out, value: r.out }, r.title || r.name || r.dir)))
-          : null,
+          : h('span', { className: 'dsev-topbar-title' }, '视频审阅'),
         tabs,
         active ? h('span', { className: 'dsev-badge' },
           h('i', { className: 'dsev-badge-dot' + (active.gates ? '' : ' dsev-badge-dot-bad') }),
