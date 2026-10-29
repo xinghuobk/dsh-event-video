@@ -1045,13 +1045,14 @@ window.__ModuleLoader__.load({
       const [pipelineState, setPipelineState] = useState({ running: false, message: '' })
       const [showAiTools, setShowAiTools] = useState(false)
       const [reviewTab, setReviewTab] = useState('chapters')
+      const [note, setNote] = useState('')
       const runEvidencePipeline = () => {
         const instructions = pipelineInstruction
           .split(/[,，;；]/)
           .map((item) => item.trim())
           .filter(Boolean)
         if (instructions.length === 0) {
-          window.alert('先输入要定位的元素，例如：商品价格')
+          setNote('先输入要定位的元素，例如：商品价格')
           return
         }
         setPipelineState({ running: true, message: '运行中：OCR + UI-TARS 融合，生成工单…', index: 0, total: 0, stage: 'start' })
@@ -1096,7 +1097,7 @@ window.__ModuleLoader__.load({
               total: done + failed,
               stage: 'done',
             })
-            window.alert(`已生成 ${done} 张融合工单${failed ? `，失败 ${failed}` : ''}`)
+            setNote(`已生成 ${done} 张融合工单${failed ? `，失败 ${failed}` : ''}`)
           } else {
             setPipelineState({ running: false, message: value.error || '证据工单失败' })
           }
@@ -1113,11 +1114,11 @@ window.__ModuleLoader__.load({
         }).then((r) => r.json()).then((value) => {
           if (value.ok) {
             setVision({ descriptions: value.descriptions || [], model: value.model })
-            window.alert(`关键帧思考完成：${value.count} 帧（${value.model}）`)
+            setNote(`关键帧思考完成：${value.count} 帧（${value.model}）`)
           } else {
-            window.alert(value.error || '关键帧思考失败')
+            setNote(value.error || '关键帧思考失败')
           }
-        }).catch(() => window.alert('关键帧思考失败'))
+        }).catch(() => setNote('关键帧思考失败'))
       }
       const describeFrames = () => {
         fetch('/event-video/describe', {
@@ -1127,11 +1128,11 @@ window.__ModuleLoader__.load({
         }).then((r) => r.json()).then((value) => {
           if (value.ok) {
             setVision({ descriptions: value.descriptions || [] })
-            window.alert(`已描述 ${value.count} 帧（失败 ${value.failed || 0}）`)
+            setNote(`已描述 ${value.count} 帧（失败 ${value.failed || 0}）`)
           } else {
-            window.alert(value.error || 'VLM 描述失败')
+            setNote(value.error || 'VLM 描述失败')
           }
-        }).catch(() => window.alert('VLM 描述失败'))
+        }).catch(() => setNote('VLM 描述失败'))
       }
       const exportWork = (kind) => {
         fetch('/event-video/work-items', {
@@ -1139,9 +1140,9 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ out: record.out, kind }),
         }).then((r) => r.json()).then((value) => {
-          if (value.dir) window.alert('已导出（' + value.count + ' 条）：' + value.dir)
-          else window.alert(value.error || '导出失败')
-        }).catch(() => window.alert('导出失败'))
+          if (value.dir) setNote('已导出（' + value.count + ' 条）：' + value.dir)
+          else setNote(value.error || '导出失败')
+        }).catch(() => setNote('导出失败'))
       }
       const addAnnotation = () => {
         const text = window.prompt('标注内容（当前时间点 ' + fmt(time) + '）')
@@ -1152,8 +1153,8 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ out: record.out, action: 'add', annotation: { t0: time, text } }),
         }).then((r) => r.json()).then((value) => {
           if (value.ok) setAnnotations(value.annotations)
-          else window.alert(value.error || '标注失败')
-        }).catch(() => window.alert('标注失败'))
+          else setNote(value.error || '标注失败')
+        }).catch(() => setNote('标注失败'))
       }
       const removeAnnotation = (id) => {
         fetch('/event-video/annotations', {
@@ -1162,8 +1163,8 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ out: record.out, action: 'delete', id }),
         }).then((r) => r.json()).then((value) => {
           if (value.ok) setAnnotations(value.annotations)
-          else window.alert(value.error || '删除失败')
-        }).catch(() => window.alert('删除失败'))
+          else setNote(value.error || '删除失败')
+        }).catch(() => setNote('删除失败'))
       }
       const review = data ? data.review : null
       const chapters = event && Array.isArray(event.chapters) ? event.chapters : []
@@ -1410,13 +1411,13 @@ window.__ModuleLoader__.load({
       const annotationsPanel = annotations.length === 0
         ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
         : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
-          h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
+          h('button', { type: 'button', className: 'dsev-time dsev-time-btn', onClick: () => seek(annotation.t0) }, fmt(annotation.t0)),
           h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))
       const descriptionsPanel = (vision.descriptions || []).length === 0
         ? h('div', { className: 'dsev-detail-empty' }, '没有描述：展开 AI 工具后点「描述画面」')
         : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
-          h('span', { className: 'dsev-time' }, fmt(item.t0)),
+          h('button', { type: 'button', className: 'dsev-time dsev-time-btn', onClick: () => seek(item.t0) }, fmt(item.t0)),
           h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))
       const flagsPanel = reviewFlags.length === 0
         ? h('div', { className: 'dsev-detail-empty' }, '没有需要人工复核的标记')
@@ -1438,6 +1439,11 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsev-video-wrap' + (playing ? ' dsev-video-playing' : '') }, video),
           src ? seekBar : null,
           controls,
+          note
+            ? h('div', { className: 'dsev-inline-note' },
+              h('span', null, note),
+              h('button', { type: 'button', className: 'dsev-note-close', onClick: () => setNote('') }, '×'))
+            : null,
           pipelineState.running || pipelineState.total
             ? h('div', { className: 'dsev-progress' },
               h('div', { className: 'dsev-progress-track' },
