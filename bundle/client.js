@@ -1708,6 +1708,12 @@ window.__ModuleLoader__.load({
               value: batchPolicy.concurrency,
               onChange: (e) => setBatchPolicy((prev) => ({ ...prev, concurrency: e.target.value })),
             })),
+          h('label', { className: 'dsev-check', title: '超过该秒数后不再开始新记录，剩余标记为跳过；0 表示不限制' }, '截止(秒)',
+            h('input', {
+              type: 'number', min: 0, className: 'dsev-input', style: { width: 72 },
+              value: batchPolicy.deadlineSeconds,
+              onChange: (e) => setBatchPolicy((prev) => ({ ...prev, deadlineSeconds: e.target.value })),
+            })),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => setSelected(records.map((r) => r.out)) }, '全选'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => setSelected([]) }, '清空'),
           h('button', {
