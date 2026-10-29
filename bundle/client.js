@@ -331,8 +331,8 @@ window.__ModuleLoader__.load({
       .dsev-ch-icon-url { color: var(--dsev-accent); }
       .dsev-ch-title { font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dsev-ch-sub { font-size: 11px; color: var(--dsev-text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .dsev-ch-right { display: flex; align-items: center; gap: 8px; }
-      .dsev-meter { flex: 1; height: 4px; border-radius: 2px; background: var(--dsev-surface-2); overflow: hidden; }
+      .dsev-ch-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 86px; }
+      .dsev-meter { width: 100%; height: 3px; border-radius: 2px; background: var(--dsev-surface-2); overflow: hidden; flex: none; }
       .dsev-meter > i { display: block; height: 100%; border-radius: 2px; background: rgba(124,140,255,0.75); }
       .dsev-num { font-family: var(--dsev-mono); font-size: 11px; color: var(--dsev-text-3); min-width: 22px; text-align: right; }
 
@@ -405,6 +405,9 @@ window.__ModuleLoader__.load({
       .dsev-seek-labels { display: flex; justify-content: space-between; font-family: var(--dsev-mono); font-size: 10.5px; color: var(--dsev-text-3); }
 
       .dsev-review-columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; margin-top: 16px; align-items: start; }
+      .dsev-review-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 8px; align-self: start; }
+      .dsev-review-side .dsev-units { max-height: calc(100vh - 380px); overflow-y: auto; }
+      .dsev-ch-att { font-size: 11px; color: var(--dsev-text-3); white-space: nowrap; }
       @media (max-width: 1080px) { .dsev-review-columns { grid-template-columns: minmax(0, 1fr); } }
       .dsev-now { border: 0.5px solid var(--dsev-border); border-radius: 14px; padding: 14px 16px; background: color-mix(in srgb, var(--dsev-surface) 92%, transparent); }
       .dsev-now-range { font-family: var(--dsev-mono); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
@@ -593,6 +596,7 @@ window.__ModuleLoader__.load({
     }
 
     function ChapterRow({ chapter, active, maxAtt, onSelect }) {
+      const attentionPct = Math.round(((chapter.attention || 0) / Math.max(1, maxAtt)) * 100)
       return h('div', {
         className: 'dsev-ch' + (active ? ' dsev-ch-on' : ''),
         onClick: onSelect,
@@ -604,9 +608,12 @@ window.__ModuleLoader__.load({
       h('div', null,
         h('div', { className: 'dsev-ch-title', title: chapter.url || '' }, hostOf(chapter.url) || '无地址栏'),
         h('div', { className: 'dsev-ch-sub' }, `${chapter.reason === 'url' ? '页面切换' : '话题'} · ${Math.round(chapter.dwell || 0)} 秒`)),
-      h('div', { className: 'dsev-ch-right' },
-        h('span', { className: 'dsev-meter' }, h('i', { style: { width: Math.round(((chapter.attention || 0) / Math.max(1, maxAtt)) * 100) + '%' } })),
-        h('span', { className: 'dsev-num' }, String(Math.round(chapter.attention || 0)))))
+      h('div', {
+        className: 'dsev-ch-right',
+        title: `注意力：相对本记录最高章节的 ${attentionPct}%（原始值 ${Math.round(chapter.attention || 0)}）`,
+      },
+      h('span', { className: 'dsev-ch-att' }, `注意力 ${attentionPct}%`),
+      h('span', { className: 'dsev-meter' }, h('i', { style: { width: attentionPct + '%' } }))))
     }
 
     function ChapterList({ chapters, activeIndex, onSelect }) {
@@ -1259,9 +1266,9 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
             h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
             chapterRows)),
-        h('div', null,
+        h('div', { className: 'dsev-review-side' },
           now,
-          h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
+          h('div', { className: 'dsev-card-box' },
             h('div', { className: 'dsev-card-title' }, '同步转写'),
             h('div', { className: 'dsev-units' }, unitRows))))
     }
