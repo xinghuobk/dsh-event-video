@@ -378,8 +378,8 @@ window.__ModuleLoader__.load({
       .dsev-review { height: 100%; display: flex; overflow: hidden; background: var(--dsev-surface); color: var(--dsw-alias-label-primary); }
       .dsev-review-main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 26px 40px; }
       .dsev-video-wrap { position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 0.5px solid var(--dsev-border); }
-      .dsev-video { display: block; width: 100%; max-height: 54vh; background: #000; }
-      .dsev-video-empty { position: relative; display: block; height: 220px; color: var(--dsev-text-3); font-size: 13px; border: 1px dashed var(--dsev-border); border-radius: 12px; overflow: hidden; background: var(--dsev-surface-2); }
+      .dsev-video { display: block; width: 100%; max-height: 64vh; object-fit: contain; background: #000; }
+      .dsev-video-empty { position: relative; display: block; height: 340px; color: var(--dsev-text-3); font-size: 13px; border: 1px dashed var(--dsev-border); border-radius: 12px; overflow: hidden; background: var(--dsev-surface-2); }
       .dsev-video-empty-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.42; filter: saturate(0.9); }
       .dsev-video-empty-overlay { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(180deg, rgba(0,0,0,0.2), rgba(0,0,0,0.55)); }
       .dsev-summary-strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 2px; }
@@ -410,8 +410,8 @@ window.__ModuleLoader__.load({
       }
       .dsev-seek-labels { display: flex; justify-content: space-between; font-family: var(--dsev-mono); font-size: 10.5px; color: var(--dsev-text-3); }
 
-      .dsev-review-columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; margin-top: 16px; align-items: start; }
-      .dsev-review-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; align-items: start; }
+      .dsev-review-columns { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; margin-top: 16px; align-items: start; }
+      .dsev-review-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
       .dsev-review-side { display: flex; flex-direction: column; gap: 16px; align-self: stretch; min-height: 0; }
       .dsev-review-side > .dsev-card-box:last-child { flex: 1; display: flex; flex-direction: column; min-height: 0; }
       .dsev-review-side .dsev-units { flex: 1; overflow-y: auto; max-height: none; }
@@ -574,6 +574,27 @@ window.__ModuleLoader__.load({
       .dsev-grid-cards > *:nth-child(5) { animation-delay: 0.12s; }
       .dsev-grid-cards > *:nth-child(6) { animation-delay: 0.15s; }
       @keyframes dsev-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+      /* --- readability + player emphasis --- */
+      .dsev-player-hero { margin-top: 12px; }
+      .dsev { font-size: 14.5px; }
+      .dsev-meta { font-size: 12.5px; }
+      .dsev-card-title { font-size: 14px; }
+      .dsev-tab { font-size: 14px; }
+      .dsev-btn { font-size: 13.5px; }
+      .dsev-topbar-title, .dsev-record-select { font-size: 17px; }
+      .dsev-record-select { height: 34px; }
+      .dsev-sum-chip-label { font-size: 12px; }
+      .dsev-sum-chip-value { font-size: 16px; }
+      .dsev-ch-time { font-size: 12.5px; }
+      .dsev-ch-title { font-size: 14px; }
+      .dsev-ch-sub { font-size: 12px; }
+      .dsev-ch-att { font-size: 12px; }
+      .dsev-unit { font-size: 13.5px; }
+      .dsev-time { font-size: 12.5px; }
+      .dsev-now-range { font-size: 21px; }
+      .dsev-now-url { font-size: 13px; }
+      .dsev-now-label { font-size: 13.5px; }
+      .dsev-flag-row { font-size: 12.5px; }
       @media (prefers-reduced-motion: reduce) {
         .dsev, .dsev * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
       }
@@ -1338,8 +1359,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsev-sum-chip-value' }, String(value)))))
       return h('div', { className: 'dsev-review-layout' },
         summaryStrip,
-        h('div', { className: 'dsev-review-columns' },
-        h('div', null,
+        h('div', { className: 'dsev-player-hero' },
           h('div', { className: 'dsev-video-wrap' + (playing ? ' dsev-video-playing' : '') }, video),
           src ? seekBar : null,
           controls,
@@ -1349,7 +1369,8 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'dsev-progress-fill', style: { width: `${pipelinePct}%` } })),
               h('div', { className: 'dsev-progress-label' },
                 `${pipelineState.message || ''}${pipelineState.total ? `（${pipelineState.index || 0}/${pipelineState.total}）` : ''}`))
-            : null,
+            : null),
+        h('div', { className: 'dsev-review-columns' },
           h('div', { className: 'dsev-review-cards' },
             h('div', { className: 'dsev-card-box' },
               h('div', { className: 'dsev-card-title' }, `标注（${annotations.length}）`),
@@ -1375,12 +1396,12 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'dsev-sum-top-title', title: flag.detail || '' }, flag.detail || '')))),
             h('div', { className: 'dsev-card-box' },
               h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
-              chapterRows))),
-        h('div', { className: 'dsev-review-side' },
-          now,
-          h('div', { className: 'dsev-card-box' },
-            h('div', { className: 'dsev-card-title' }, '同步转写'),
-            h('div', { className: 'dsev-units' }, unitRows)))))
+              chapterRows)),
+          h('div', { className: 'dsev-review-side' },
+            now,
+            h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, '同步转写'),
+              h('div', { className: 'dsev-units' }, unitRows)))))
     }
 
     function ReviewPanel() {
