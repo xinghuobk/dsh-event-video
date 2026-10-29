@@ -886,11 +886,33 @@ window.__ModuleLoader__.load({
           return
         }
         setPipelineState({ running: true, message: '运行中：OCR + UI-TARS 融合，生成工单…' })
+        let timer = null
+        const stopPolling = () => {
+          if (timer) {
+            clearInterval(timer)
+            timer = null
+          }
+        }
+        timer = setInterval(() => {
+          fetch('/event-video/pipeline-progress?out=' + encodeURIComponent(record.out))
+            .then((r) => r.json())
+            .then((progress) => {
+              if (progress && progress.running) {
+                const index = Number(progress.index || 0)
+                const total = Number(progress.total || 0)
+                setPipelineState({
+                  running: true,
+                  message: `${progress.message || '运行中'}（${index}/${total || '?'}）`,
+                })
+              }
+            }).catch(() => {})
+        }, 800)
         fetch('/event-video/pipeline', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ out: record.out, instructions, samples: 3 }),
         }).then((r) => r.json()).then((value) => {
+          stopPolling()
           if (value.ok) {
             const tickets = value.tickets || []
             const done = tickets.filter((item) => !item.error).length
@@ -903,7 +925,10 @@ window.__ModuleLoader__.load({
           } else {
             setPipelineState({ running: false, message: value.error || '证据工单失败' })
           }
-        }).catch(() => setPipelineState({ running: false, message: '证据工单请求失败' }))
+        }).catch(() => {
+          stopPolling()
+          setPipelineState({ running: false, message: '证据工单请求失败' })
+        })
       }
       const describeKeyFrames = () => {
         fetch('/event-video/describe', {

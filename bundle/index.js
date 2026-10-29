@@ -2065,6 +2065,26 @@ function defaultPipelineTimes(event) {
   return [...times].sort((a, b) => a - b)
 }
 
+async function writePipelineProgress(out, payload) {
+  try {
+    await fs.writeFile(join(out, 'pipeline-progress.json'), JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      ...payload,
+    }, null, 1))
+  } catch {
+    /* progress is best-effort */
+  }
+}
+
+async function readPipelineProgress(out) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  try {
+    return JSON.parse(await fs.readFile(join(out, 'pipeline-progress.json'), 'utf8'))
+  } catch {
+    return { running: false }
+  }
+}
+
 async function runVisionPipeline(out, options = {}) {
   if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
   const event = await eventFor(out)
@@ -2076,12 +2096,24 @@ async function runVisionPipeline(out, options = {}) {
     ? options.times.map(Number).filter((value) => Number.isFinite(value) && value >= 0)
     : defaultPipelineTimes(event)
   const samples = Math.max(1, Math.min(3, Number(options.samples) || 3))
+  const total = times.length * instructions.length
+  let completed = 0
+  let failed = 0
   const stages = []
+  await writePipelineProgress(out, {
+    running: true, stage: 'starting', index: 0, total, message: '准备流水线…',
+  })
   if (options.describe) {
+    await writePipelineProgress(out, {
+      running: true, stage: 'describe', index: 0, total, message: '批量描述中…',
+    })
     const result = await describeRecord(out, { limit: options.describeLimit || 12 })
     stages.push({ stage: 'describe', model: result.model, count: result.count, failed: result.failed })
   }
   if (options.think) {
+    await writePipelineProgress(out, {
+      running: true, stage: 'think', index: 0, total, message: '关键帧思考中…',
+    })
     const result = await describeRecord(out, { limit: options.thinkLimit || 4, keyFrames: true, think: true })
     stages.push({ stage: 'think', model: result.model, count: result.count, failed: result.failed })
   }
@@ -2089,8 +2121,18 @@ async function runVisionPipeline(out, options = {}) {
   if (instructions.length > 0) {
     for (const t of times) {
       for (const instruction of instructions) {
+        await writePipelineProgress(out, {
+          running: true,
+          stage: 'fuse',
+          index: completed + failed,
+          total,
+          t,
+          instruction,
+          message: `融合定位：${fmtClock(t)} ${instruction}`,
+        })
         try {
           const result = await fuseToWorkItem(out, t, instruction, { samples })
+          completed += 1
           tickets.push({
             t,
             instruction,
@@ -2102,14 +2144,15 @@ async function runVisionPipeline(out, options = {}) {
             exportDir: result.export.dir,
           })
         } catch (error) {
+          failed += 1
           tickets.push({ t, instruction, error: String(error.message) })
         }
       }
     }
     stages.push({
       stage: 'fuse_tickets',
-      count: tickets.filter((item) => !item.error).length,
-      failed: tickets.filter((item) => item.error).length,
+      count: completed,
+      failed,
     })
   }
   const data = {
@@ -2123,6 +2166,16 @@ async function runVisionPipeline(out, options = {}) {
   }
   const target = join(out, 'pipeline.json')
   await fs.writeFile(target, JSON.stringify(data, null, 1))
+  await writePipelineProgress(out, {
+    running: false,
+    stage: 'done',
+    index: completed + failed,
+    total,
+    done: completed,
+    failed,
+    seconds: data.seconds,
+    message: `完成：${completed} 张工单${failed ? `，失败 ${failed}` : ''}`,
+  })
   return { ok: true, out, stages, tickets, seconds: data.seconds, path: target }
 }
 
@@ -2686,6 +2739,15 @@ function handler(req, res) {
       const body = await readBody(req)
       try {
         sendJson(res, 200, await groundUiElement(body.out, body.t, body.instruction))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/pipeline-progress' && req.method === 'GET') {
+      const out = url.searchParams.get('out') || ''
+      try {
+        sendJson(res, 200, await readPipelineProgress(out))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -3424,6 +3486,7 @@ export const __test = {
   fuseWorkItemTool,
   runVisionPipeline,
   runPipelineTool,
+  readPipelineProgress,
   groundConsensus,
   checkDescriptionWithOcr,
   matchOcrTarget,

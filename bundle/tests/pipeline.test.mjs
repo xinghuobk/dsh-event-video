@@ -47,6 +47,10 @@ assert.equal(result.tickets[0].ticket.priority, 'P1')
 assert.ok(result.stages.some((stage) => stage.stage === 'fuse_tickets'))
 assert.equal(__test.runPipelineTool.name, 'run_vision_pipeline')
 
+const progress = JSON.parse(await readFile(join(out, 'pipeline-progress.json'), 'utf8'))
+assert.equal(progress.running, false)
+assert.equal(progress.done, 1)
+
 const saved = JSON.parse(await readFile(join(out, 'pipeline.json'), 'utf8'))
 assert.equal(saved.tickets.length, 1)
 assert.ok(saved.stages.some((stage) => stage.stage === 'fuse_tickets'))
