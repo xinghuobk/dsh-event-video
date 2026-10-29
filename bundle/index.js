@@ -388,7 +388,7 @@ async function workItemsFromRecord(out) {
     if (annotation.resolved) continue
     items.push({
       title: annotation.text,
-      detail: `来自 ${fmtClock(annotation.t0)} 的标注（${annotation.author || 'user'}）`,
+      detail: `来自 ${fmtClock(annotation.t0)} 的标注（${annotation.author || 'user'}${Array.isArray(annotation.replies) && annotation.replies.length ? `，${annotation.replies.length} 条回复` : ''}）`,
       priority: annotation.kind === 'label' ? 'P2' : 'P1',
       t0: annotation.t0,
       t1: annotation.t1,
@@ -531,6 +531,18 @@ async function eventFor(out) {
   return JSON.parse(await fs.readFile(join(out, 'event.json'), 'utf8'))
 }
 
+function normalizeReply(input) {
+  const text = String((input && input.text) || '').trim()
+  if (!text) throw new Error('reply text is required')
+  if (text.length > 500) throw new Error('reply is limited to 500 characters')
+  return {
+    id: randomUUID(),
+    text,
+    author: String((input && input.author) || 'user').slice(0, 40),
+    createdAt: new Date().toISOString(),
+  }
+}
+
 function normalizeAnnotation(input) {
   const t0 = Number(input.t0)
   if (!Number.isFinite(t0) || t0 < 0) throw new Error('t0 must be a non-negative number of seconds')
@@ -540,6 +552,17 @@ function normalizeAnnotation(input) {
   if (!text) throw new Error('text is required')
   if (text.length > 500) throw new Error('text is limited to 500 characters')
   const kind = input.kind === 'label' ? 'label' : 'note'
+  const replies = Array.isArray(input.replies)
+    ? input.replies
+      .filter((reply) => reply && String(reply.text || '').trim())
+      .slice(0, 50)
+      .map((reply) => ({
+        id: String(reply.id || randomUUID()),
+        text: String(reply.text).trim().slice(0, 500),
+        author: String(reply.author || 'user').slice(0, 40),
+        createdAt: String(reply.createdAt || new Date().toISOString()),
+      }))
+    : []
   return {
     id: randomUUID(),
     kind,
@@ -548,8 +571,24 @@ function normalizeAnnotation(input) {
     text,
     author: String(input.author || 'user').slice(0, 40),
     resolved: Boolean(input.resolved),
+    replies,
     createdAt: new Date().toISOString(),
   }
+}
+
+async function addReply(out, id, input) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const data = await readAnnotations(out)
+  const index = data.annotations.findIndex((item) => item.id === id)
+  if (index < 0) throw new Error('annotation not found')
+  const reply = normalizeReply(input)
+  const annotation = data.annotations[index]
+  annotation.replies = Array.isArray(annotation.replies) ? annotation.replies : []
+  annotation.replies.push(reply)
+  annotation.updatedAt = new Date().toISOString()
+  data.annotations[index] = annotation
+  await writeAnnotations(out, data)
+  return { ok: true, reply, annotation, annotations: data.annotations }
 }
 
 async function addAnnotation(out, input) {
@@ -2759,6 +2798,30 @@ const annotateTool = {
   },
 }
 
+const replyAnnotationTool = {
+  name: 'reply_video_annotation',
+  description: 'Add a threaded reply to a timestamped annotation (same timecode discussion). Only annotations.json is written.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 'id', 'text'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      id: { type: 'string', description: 'Annotation id.' },
+      text: { type: 'string', description: 'Reply text (max 500 chars).' },
+      author: { type: 'string', description: 'Author name (default user).' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    return addReply(args.out, args.id, { text: args.text, author: args.author || 'agent' })
+  },
+}
+
 const resolveAnnotationTool = {
   name: 'resolve_video_annotation',
   description: 'Mark a timestamped annotation as resolved (or reopen it). Only annotations.json is written; event.json is never modified.',
@@ -3191,6 +3254,8 @@ function handler(req, res) {
             sendJson(res, 200, await updateAnnotation(body.out, body.id, body.patch || {}))
           } else if (body.action === 'delete') {
             sendJson(res, 200, await deleteAnnotation(body.out, body.id))
+          } else if (body.action === 'reply') {
+            sendJson(res, 200, await addReply(body.out, body.id, { text: body.text, author: body.author }))
           } else {
             sendJson(res, 400, { error: 'unknown action' })
           }
@@ -3649,6 +3714,7 @@ export function apply(ctx, config) {
     ctx.effect(() => ctx.tools.register(annotateTool), 'event-video: annotate tool')
     ctx.effect(() => ctx.tools.register(listAnnotationsTool), 'event-video: annotations tool')
   ctx.effect(() => ctx.tools.register(resolveAnnotationTool), 'event-video: resolve annotation tool')
+  ctx.effect(() => ctx.tools.register(replyAnnotationTool), 'event-video: reply annotation tool')
   }
   if (WORK_ITEMS_ENABLED) {
     ctx.effect(() => ctx.tools.register(exportWorkItemsTool), 'event-video: work items tool')
@@ -3693,6 +3759,8 @@ export const __test = {
   exportWorkItems,
   workItemsFromRecord,
   resolveAnnotationTool,
+  replyAnnotationTool,
+  addReply,
   normalizeWorkItems,
   planVisionFrames,
   planKeyVisionFrames,

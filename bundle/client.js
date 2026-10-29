@@ -555,6 +555,16 @@ window.__ModuleLoader__.load({
       .dsev-comment-done .dsev-comment-status { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); }
       .dsev-comment-body { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--dsev-text-2); }
       .dsev-comment-toggle { font-size: 12px; }
+      .dsev-comment-replies {
+        margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--dsev-border);
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .dsev-comment-reply-author { font-size: 11px; color: var(--dsev-text-3); }
+      .dsev-comment-reply-text { font-size: 13px; color: var(--dsev-text-2); line-height: 1.5; }
+      .dsev-comment-actions { margin-top: 8px; display: flex; gap: 6px; }
+      .dsev-comment-reply-btn { font-size: 12px; }
+      .dsev-comment-reply-form { display: flex; gap: 6px; margin-top: 8px; }
+      .dsev-comment-reply-form .dsev-input { flex: 1; }
       .dsev-lib-card img { transition: transform 0.35s ease, filter 0.35s ease; }
       .dsev-lib-card:hover img { transform: scale(1.04); filter: saturate(1.1) brightness(1.03); }
       .dsev-video-wrap { box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.04); transition: box-shadow 0.3s ease; }
@@ -1069,6 +1079,8 @@ window.__ModuleLoader__.load({
       const [reviewTab, setReviewTab] = useState('chapters')
       const [note, setNote] = useState('')
       const [annotationFilter, setAnnotationFilter] = useState('open')
+      const [replyTo, setReplyTo] = useState(null)
+      const [replyText, setReplyText] = useState('')
       const runEvidencePipeline = () => {
         const instructions = pipelineInstruction
           .split(/[,，;；]/)
@@ -1188,6 +1200,24 @@ window.__ModuleLoader__.load({
           if (value.ok) setAnnotations(value.annotations)
           else setNote(value.error || '删除失败')
         }).catch(() => setNote('删除失败'))
+      }
+      const sendReply = (annotation) => {
+        const reply = String(replyText || '').trim()
+        if (!reply) return
+        fetch('/event-video/annotations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, action: 'reply', id: annotation.id, text: reply, author: 'user' }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) {
+            setAnnotations(value.annotations)
+            setReplyTo(null)
+            setReplyText('')
+            setNote('回复已添加')
+          } else {
+            setNote(value.error || '回复失败')
+          }
+        }).catch(() => setNote('回复失败'))
       }
       const toggleResolved = (annotation) => {
         fetch('/event-video/annotations', {
@@ -1489,7 +1519,30 @@ window.__ModuleLoader__.load({
               type: 'button', className: 'dsev-btn',
               onClick: () => removeAnnotation(annotation.id),
             }, '删除')),
-          h('div', { className: 'dsev-comment-body' }, annotation.text))),
+          h('div', { className: 'dsev-comment-body' }, annotation.text),
+          (annotation.replies || []).length > 0
+            ? h('div', { className: 'dsev-comment-replies' },
+              annotation.replies.map((reply) => h('div', { className: 'dsev-comment-reply', key: reply.id },
+                h('div', { className: 'dsev-comment-reply-author' }, reply.author || 'user'),
+                h('div', { className: 'dsev-comment-reply-text' }, reply.text))))
+            : null,
+          h('div', { className: 'dsev-comment-actions' },
+            h('button', {
+              type: 'button', className: 'dsev-btn dsev-comment-reply-btn',
+              onClick: () => {
+                setReplyTo(replyTo === annotation.id ? null : annotation.id)
+                setReplyText('')
+              },
+            }, `回复${(annotation.replies || []).length ? ` ${annotation.replies.length}` : ''}`)),
+          replyTo === annotation.id
+            ? h('div', { className: 'dsev-comment-reply-form' },
+              h('input', {
+                className: 'dsev-input', value: replyText, placeholder: '写一条回复…',
+                onInput: (e) => setReplyText(e.target.value),
+                onKeyDown: (e) => { if (e.key === 'Enter') sendReply(annotation) },
+              }),
+              h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: () => sendReply(annotation) }, '发送'))
+            : null)),
           filteredAnnotations.length === 0
             ? h('div', { className: 'dsev-detail-empty' }, annotationFilter === 'open' ? '没有未完成的标注' : '没有已完成的标注')
             : null,

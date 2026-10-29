@@ -12,7 +12,7 @@ This note records what the plugin's review UI borrows from professional video-re
 
 ## Rules we adopt
 
-1. **Timecode is the spine.** Every annotation, description and chapter shows a timecode chip; clicking it seeks the player. Review panels are sorted by time. Annotations render as comment cards with author, 待处理/已完成 status, filter chips and a resolve toggle (Frame.io pattern); resolved annotations are excluded from exported work items.
+1. **Timecode is the spine.** Every annotation, description and chapter shows a timecode chip; clicking it seeks the player. Review panels are sorted by time. Annotations render as comment cards with author, 待处理/已完成 status, filter chips, a resolve toggle and **threaded replies** on the same timecode (Frame.io pattern); resolved annotations are excluded from exported work items and reply counts show up in exported tickets.
 2. **One task per screen.** Library is a chooser; Review is a player plus one tabbed panel (`章节 / 转写 / 标注 / 描述 / 标记`). Secondary views live in **更多**.
 3. **Chrome recedes.** Neutral surfaces, one accent, no glowing cards or shimmering bars; borders are soft and few. The player has the highest visual weight.
 4. **The transcript is always one click away.** NN/g's control/alternate-path rule maps to the 转写 tab; no AI output is the only copy of a fact.
