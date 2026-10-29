@@ -618,6 +618,25 @@ window.__ModuleLoader__.load({
       .dsev-build-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
       .dsev-build-head .dsev-grow { flex: 1; }
       .dsev-build-head .dsev-build-title { margin: 0; font-size: 14px; }
+      .dsev-more-view { max-width: 110px; }
+      .dsev-review-tabs { display: flex; gap: 6px; margin-top: 16px; border-bottom: 0.5px solid var(--dsev-border); }
+      .dsev-review-tab {
+        position: relative; border: 0; background: transparent; color: var(--dsev-text-3);
+        padding: 9px 13px 11px; font-size: 13.5px; cursor: pointer; border-radius: 8px 8px 0 0;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+      .dsev-review-tab:hover { color: var(--dsev-text-1); background: rgba(124, 140, 255, 0.07); }
+      .dsev-review-tab-on { color: var(--dsev-text-1); font-weight: 600; }
+      .dsev-review-tab-on::after {
+        content: ''; position: absolute; left: 10px; right: 10px; bottom: -0.5px; height: 2px;
+        border-radius: 2px; background: var(--dsev-accent); box-shadow: 0 0 8px rgba(124, 140, 255, 0.7);
+      }
+      .dsev-review-panel {
+        margin-top: 14px; border: 0.5px solid var(--dsev-border); border-radius: 14px;
+        padding: 10px 14px; background: var(--dsev-surface); min-height: 160px;
+      }
+      .dsev-panel-scroll { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+      .dsev-now { margin-top: 12px; }
       @media (prefers-reduced-motion: reduce) {
         .dsev, .dsev * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
       }
@@ -1025,6 +1044,7 @@ window.__ModuleLoader__.load({
       const [pipelineInstruction, setPipelineInstruction] = useState('')
       const [pipelineState, setPipelineState] = useState({ running: false, message: '' })
       const [showAiTools, setShowAiTools] = useState(false)
+      const [reviewTab, setReviewTab] = useState('chapters')
       const runEvidencePipeline = () => {
         const instructions = pipelineInstruction
           .split(/[,，;；]/)
@@ -1380,6 +1400,38 @@ window.__ModuleLoader__.load({
         ].map(([label, value]) => h('div', { className: 'dsev-sum-chip', key: label },
           h('span', { className: 'dsev-sum-chip-label' }, label),
           h('span', { className: 'dsev-sum-chip-value' }, String(value)))))
+      const reviewTabs = [
+        ['chapters', `章节 ${chapters.length}`],
+        ['transcript', `转写 ${windowUnits.length}`],
+        ['annotations', `标注 ${annotations.length}`],
+        ['descriptions', `描述 ${(vision.descriptions || []).length}`],
+        ['flags', `标记 ${reviewFlags.length}`],
+      ]
+      const annotationsPanel = annotations.length === 0
+        ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
+        : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
+          h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
+          h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))
+      const descriptionsPanel = (vision.descriptions || []).length === 0
+        ? h('div', { className: 'dsev-detail-empty' }, '没有描述：展开 AI 工具后点「描述画面」')
+        : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
+          h('span', { className: 'dsev-time' }, fmt(item.t0)),
+          h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))
+      const flagsPanel = reviewFlags.length === 0
+        ? h('div', { className: 'dsev-detail-empty' }, '没有需要人工复核的标记')
+        : reviewFlags.slice(0, 30).map((flag, index) => h('div', { className: 'dsev-flag-row', key: (flag.code || 'flag') + index },
+          h('span', { className: 'dsev-flag-code' }, flag.code || 'flag'),
+          h('span', { className: 'dsev-sum-top-title', title: flag.detail || '' }, flag.detail || '')))
+      const panel = reviewTab === 'transcript'
+        ? h('div', { className: 'dsev-units dsev-panel-scroll' }, unitRows)
+        : reviewTab === 'annotations'
+          ? annotationsPanel
+          : reviewTab === 'descriptions'
+            ? descriptionsPanel
+            : reviewTab === 'flags'
+              ? flagsPanel
+              : chapterRows
       return h('div', { className: 'dsev-review-layout' },
         summaryStrip,
         h('div', { className: 'dsev-player-hero' },
@@ -1393,38 +1445,14 @@ window.__ModuleLoader__.load({
               h('div', { className: 'dsev-progress-label' },
                 `${pipelineState.message || ''}${pipelineState.total ? `（${pipelineState.index || 0}/${pipelineState.total}）` : ''}`))
             : null),
-        h('div', { className: 'dsev-review-columns' },
-          h('div', { className: 'dsev-review-cards' },
-            h('div', { className: 'dsev-card-box' },
-              h('div', { className: 'dsev-card-title' }, `标注（${annotations.length}）`),
-              annotations.length === 0
-                ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
-                : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
-                  h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
-                  h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
-                  h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))),
-            h('div', { className: 'dsev-card-box' },
-              h('div', { className: 'dsev-card-title' }, `VLM 画面描述（${(vision.descriptions || []).length}）`),
-              (vision.descriptions || []).length === 0
-                ? h('div', { className: 'dsev-detail-empty' }, '没有描述：配置 vlmEndpoint 后点「描述画面」')
-                : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
-                  h('span', { className: 'dsev-time' }, fmt(item.t0)),
-                  h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))),
-            h('div', { className: 'dsev-card-box' },
-              h('div', { className: 'dsev-card-title' }, `审阅标记（${reviewFlags.length}）`),
-              reviewFlags.length === 0
-                ? h('div', { className: 'dsev-detail-empty' }, '没有需要人工复核的标记')
-                : reviewFlags.slice(0, 8).map((flag, index) => h('div', { className: 'dsev-flag-row', key: (flag.code || 'flag') + index },
-                  h('span', { className: 'dsev-flag-code' }, flag.code || 'flag'),
-                  h('span', { className: 'dsev-sum-top-title', title: flag.detail || '' }, flag.detail || '')))),
-            h('div', { className: 'dsev-card-box' },
-              h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
-              chapterRows)),
-          h('div', { className: 'dsev-review-side' },
-            now,
-            h('div', { className: 'dsev-card-box' },
-              h('div', { className: 'dsev-card-title' }, '同步转写'),
-              h('div', { className: 'dsev-units' }, unitRows)))))
+        now,
+        h('div', { className: 'dsev-review-tabs' },
+          reviewTabs.map(([key, label]) => h('button', {
+            key, type: 'button',
+            className: 'dsev-review-tab' + (reviewTab === key ? ' dsev-review-tab-on' : ''),
+            onClick: () => setReviewTab(key),
+          }, label))),
+        h('div', { className: 'dsev-review-panel' }, panel))
     }
 
     function ReviewPanel() {
@@ -2254,11 +2282,21 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-rec-meta' }, r.source || (r.video ? '有视频' : '无视频')))))
       const sideHead = h('div', { className: 'dsev-side-head' }, '视频库', h('span', { className: 'dsev-count' }, String(records.length)))
       const tabs = h('div', { className: 'dsev-tabs' },
-        [['library', '库'], ['review', '审阅'], ['overview', '总览'], ['summary', '汇总'], ['camera', '摄像头']].map(([key, label]) => h('button', {
+        [['library', '库'], ['review', '审阅']].map(([key, label]) => h('button', {
           key, type: 'button',
           className: 'dsev-tab' + (view === key ? ' dsev-tab-on' : ''),
           onClick: () => setView(key),
-        }, label)))
+        }, label)),
+        h('select', {
+          className: 'dsev-select dsev-more-view',
+          value: ['overview', 'summary', 'camera'].includes(view) ? view : '',
+          onChange: (e) => { if (e.target.value) setView(e.target.value) },
+          title: '更多视图',
+        },
+        h('option', { value: '' }, '更多'),
+        h('option', { value: 'overview' }, '总览'),
+        h('option', { value: 'summary' }, '汇总'),
+        h('option', { value: 'camera' }, '摄像头')))
       const header = h('div', { className: 'dsev-topbar' },
         records.length > 0
           ? h('select', {
