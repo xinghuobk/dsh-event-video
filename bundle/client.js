@@ -373,6 +373,10 @@ window.__ModuleLoader__.load({
       .dsev-video { display: block; width: 100%; max-height: 54vh; background: #000; }
       .dsev-video-empty { display: flex; align-items: center; justify-content: center; height: 260px; color: var(--dsev-text-3); font-size: 13px; }
       .dsev-controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+      .dsev-progress { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+      .dsev-progress-track { height: 6px; border-radius: 999px; background: rgba(127,127,127,0.18); overflow: hidden; }
+      .dsev-progress-fill { height: 100%; border-radius: 999px; background: var(--dsev-accent); transition: width 0.25s ease; }
+      .dsev-progress-label { font-size: 12px; opacity: 0.75; }
       .dsev-select {
         height: 28px; border: 0.5px solid var(--dsev-border); border-radius: 8px;
         background: var(--dsev-surface); color: var(--dsw-alias-label-primary);
@@ -888,7 +892,7 @@ window.__ModuleLoader__.load({
           window.alert('先输入要定位的元素，例如：商品价格')
           return
         }
-        setPipelineState({ running: true, message: '运行中：OCR + UI-TARS 融合，生成工单…' })
+        setPipelineState({ running: true, message: '运行中：OCR + UI-TARS 融合，生成工单…', index: 0, total: 0, stage: 'start' })
         let timer = null
         const stopPolling = () => {
           if (timer) {
@@ -905,7 +909,10 @@ window.__ModuleLoader__.load({
                 const total = Number(progress.total || 0)
                 setPipelineState({
                   running: true,
-                  message: `${progress.message || '运行中'}（${index}/${total || '?'}）`,
+                  message: progress.message || '运行中',
+                  index,
+                  total,
+                  stage: progress.stage || '',
                 })
               }
             }).catch(() => {})
@@ -923,6 +930,9 @@ window.__ModuleLoader__.load({
             setPipelineState({
               running: false,
               message: `完成：${done} 张工单${failed ? `，失败 ${failed}` : ''}（${value.seconds}s）`,
+              index: done + failed,
+              total: done + failed,
+              stage: 'done',
             })
             window.alert(`已生成 ${done} 张融合工单${failed ? `，失败 ${failed}` : ''}`)
           } else {
@@ -1204,11 +1214,21 @@ window.__ModuleLoader__.load({
         onSelect: () => seek(c.t0),
       }))
 
+      const pipelinePct = pipelineState.total
+        ? Math.min(100, Math.round(((pipelineState.index || 0) / pipelineState.total) * 100))
+        : (pipelineState.running ? 10 : 100)
       return h('div', { className: 'dsev-review-columns' },
         h('div', null,
           h('div', { className: 'dsev-video-wrap' }, video),
           seekBar,
           controls,
+          pipelineState.running || pipelineState.total
+            ? h('div', { className: 'dsev-progress' },
+              h('div', { className: 'dsev-progress-track' },
+                h('div', { className: 'dsev-progress-fill', style: { width: `${pipelinePct}%` } })),
+              h('div', { className: 'dsev-progress-label' },
+                `${pipelineState.message || ''}${pipelineState.total ? `（${pipelineState.index || 0}/${pipelineState.total}）` : ''}`))
+            : null,
           h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
             h('div', { className: 'dsev-card-title' }, `标注（${annotations.length}）`),
             annotations.length === 0
