@@ -10,6 +10,9 @@
 - JS library indexer (no Python script dependency for the UI)
 - event-triggered voice: `speak_text` (SAPI / command / OpenAI-compatible TTS) and `camera_voice_react` (wait for wave/gesture/face event, speak a template, return event+tts), `enableVoice` switch, fake-TTS acceptance test
 - training-free evidence fusion: `fuse_vision_evidence` (OCR box + UI-TARS point cross-check, confidence/conflicts/evidence), OCR boxes in adapter, classic fallback on native crash
+- multi-sample consensus: `samples:3` paraphrased grounding instructions clustered by coordinate (agreement/spread), confidence boost when inside OCR box
+- description consistency: VLM description entities checked against OCR text, contradictions flagged (`description_ocr_mismatch`)
+- fused ticket: `fuse_to_work_item` exports a ticket from fused evidence (element, box, point, confidence, conflicts, acceptance) under `exports/`
 - UI-TARS-7B grounding: `ground_ui_element` tool + `/event-video/ground`, llama.cpp GGUF adapter (`scripts/uitars_ground.py`), start script, per-frame+instruction cache
 - PaddleOCR-VL integration: `ocr_video_frame` tool + `/event-video/ocr`, `scripts/paddleocr_vl.py` adapter (classic PaddleOCR fallback), per-frame cache, CPU latency noted in docs
 - orchestration layer: `docs/ORCHESTRATION.md`, `scripts/vision_pipeline.py` (DAG stages, single-resident model swapping, cache, checkpoints, memory guard), `specs/review.json` example

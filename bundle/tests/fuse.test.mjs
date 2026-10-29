@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, unlink, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -57,5 +57,33 @@ const outside = await __test.fuseVisionEvidence(out, 2, '价格 $220.00 第二�
 assert.equal(outside.inside, false)
 assert.equal(outside.confidence, 0.45)
 assert.ok(outside.conflicts.includes('point_outside_ocr_box'))
+
+__test.configure({ groundArgs: [groundInside] })
+const consensus = await __test.fuseVisionEvidence(out, 2, '价格 $220.00 共识', { samples: 3 })
+assert.equal(consensus.samples, 3)
+assert.equal(consensus.consensus.agreement, 1)
+assert.equal(consensus.consensus.variants.length, 3)
+assert.equal(consensus.inside, true)
+assert.equal(consensus.confidence, 0.98)
+
+await writeFile(join(out, 'vision.json'), JSON.stringify({
+  version: 1, descriptions: [{ t0: 2, frame: 'f_000003.jpg', description: '页面显示价格 $220.00，品牌 orinodo，设计简约。' }],
+}), 'utf8')
+const withDescription = await __test.fuseVisionEvidence(out, 2, '价格 $220.00 描述')
+assert.ok(withDescription.descriptionCheck)
+assert.ok(withDescription.descriptionCheck.contradictions.includes('orinodo'))
+assert.ok(withDescription.conflicts.includes('description_ocr_mismatch'))
+assert.ok(withDescription.confidence <= 0.7)
+
+await unlink(join(out, 'vision.json'))
+const ticket = await __test.fuseToWorkItem(out, 2, '价格 $220.00 工单', { samples: 3, title: '价格元素核对' })
+assert.equal(ticket.ok, true)
+assert.equal(ticket.item.priority, 'P1')
+assert.equal(ticket.item.title, '价格元素核对')
+assert.ok(ticket.item.detail.includes('点-框命中'))
+assert.equal(ticket.export.kind, 'tickets')
+const exportFiles = await readdir(ticket.export.dir)
+assert.ok(exportFiles.includes('tickets.md'))
+assert.ok(exportFiles.includes('tickets.json'))
 
 console.log('FUSE OK')

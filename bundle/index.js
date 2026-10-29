@@ -1844,10 +1844,109 @@ function matchOcrTarget(lines, boxes, instruction) {
   return { text: scan[bestIndex], box, index: bestIndex, score: Math.round(bestScore * 10) / 10 }
 }
 
-async function fuseVisionEvidence(out, t, instruction) {
+function paraphraseInstruction(instruction) {
+  const text = String(instruction || '').trim()
+  return [
+    text,
+    `请定位界面中的目标：${text}`,
+    `找到「${text}」对应的界面元素并给出坐标`,
+  ]
+}
+
+function clusterPoints(points, threshold = 48) {
+  const list = points.filter((point) => Array.isArray(point) && point.length === 2)
+  if (list.length === 0) return null
+  let best = null
+  for (const point of list) {
+    const neighbors = list.filter((other) => Math.hypot(other[0] - point[0], other[1] - point[1]) <= threshold)
+    if (!best || neighbors.length > best.neighbors.length) best = { point, neighbors }
+  }
+  const x = Math.round(best.neighbors.reduce((sum, point) => sum + point[0], 0) / best.neighbors.length)
+  const y = Math.round(best.neighbors.reduce((sum, point) => sum + point[1], 0) / best.neighbors.length)
+  const spread = Math.max(...best.neighbors.map((point) => Math.hypot(point[0] - x, point[1] - y)))
+  return {
+    point: [x, y],
+    clusterSize: best.neighbors.length,
+    total: list.length,
+    agreement: best.neighbors.length / list.length,
+    spreadPx: Math.round(spread * 10) / 10,
+  }
+}
+
+async function groundConsensus(out, t, instruction, samples = 3) {
+  const variants = paraphraseInstruction(instruction).slice(0, Math.max(2, Math.min(3, samples)))
+  const results = []
+  for (const variant of variants) {
+    try {
+      results.push(await groundUiElement(out, t, variant))
+    } catch (error) {
+      results.push({ instruction: variant, point: null, error: String(error.message) })
+    }
+  }
+  const cluster = clusterPoints(results.map((item) => item.point))
+  return {
+    engine: 'UI-TARS-7B consensus',
+    variants: results.map((item) => ({
+      instruction: item.instruction, point: item.point || null, cached: Boolean(item.cached),
+    })),
+    point: cluster ? cluster.point : null,
+    agreement: cluster ? cluster.agreement : 0,
+    clusterSize: cluster ? cluster.clusterSize : 0,
+    spreadPx: cluster ? cluster.spreadPx : null,
+    confidence: cluster ? (cluster.agreement >= 1 ? 0.9 : cluster.agreement >= 0.66 ? 0.7 : 0.5) : 0,
+  }
+}
+
+function extractEntities(text) {
+  const found = new Set()
+  const source = String(text || '')
+  for (const match of source.matchAll(/["“”']([^"“”']{2,40})["“”']/g)) found.add(match[1].trim())
+  for (const match of source.matchAll(/\$?\d[\d,.]*(?:\.\d+)?/g)) {
+    const value = match[0].replace(/[,，。]/g, '')
+    if (value.replace(/\D/g, '').length >= 2) found.add(value)
+  }
+  for (const match of source.matchAll(/[A-Za-z][A-Za-z0-9&'.-]{3,}/g)) {
+    const word = match[0]
+    if (!/^(this|that|with|from|where|when|what|which|there|their|have|been|will|about|visible|screenshot)$/i.test(word)) {
+      found.add(word)
+    }
+  }
+  return [...found].slice(0, 12)
+}
+
+function checkDescriptionWithOcr(description, ocr) {
+  const entities = extractEntities(description)
+  const haystack = String(ocr.text || '').toLowerCase().replace(/\s+/g, '')
+  const checked = entities.map((entity) => ({
+    text: entity,
+    inOcr: haystack.includes(entity.toLowerCase().replace(/\s+/g, '')),
+  }))
+  const contradictions = checked.filter((entry) => !entry.inOcr).map((entry) => entry.text)
+  if (/没有(任何)?文字|无文字|空白|黑屏|blank/i.test(description) && String(ocr.text || '').trim().length > 20) {
+    contradictions.push('claims_no_text_but_ocr_found_text')
+  }
+  return { available: true, entities: checked, contradictions, consistent: contradictions.length === 0 }
+}
+
+async function nearestVisionDescription(out, t) {
+  const vision = await readVision(out)
+  const list = Array.isArray(vision.descriptions) ? vision.descriptions : []
+  let best = null
+  for (const item of list) {
+    if (best === null || Math.abs(item.t0 - t) < Math.abs(best.t0 - t)) best = item
+  }
+  if (!best || Math.abs(best.t0 - t) > 15) return null
+  return best
+}
+
+async function fuseVisionEvidence(out, t, instruction, options = {}) {
   if (!OCR_ENABLED || !GROUND_ENABLED) throw new Error('fusion needs both OCR and grounding enabled')
   if (!instruction) throw new Error('instruction is required')
-  const [ocr, ground] = await Promise.all([ocrFrame(out, t), groundUiElement(out, t, instruction)])
+  const samples = Math.max(1, Math.min(3, Number(options.samples) || 1))
+  const [ocr, ground] = await Promise.all([
+    ocrFrame(out, t),
+    samples > 1 ? groundConsensus(out, t, instruction, samples) : groundUiElement(out, t, instruction),
+  ])
   const match = matchOcrTarget(ocr.lines, ocr.boxes, instruction)
   const point = ground.point || null
   const box = match.box
@@ -1859,22 +1958,45 @@ async function fuseVisionEvidence(out, t, instruction) {
   if (match.text && !box) conflicts.push('no_ocr_box_for_match')
   if (point && box && !inside) conflicts.push('point_outside_ocr_box')
   if (!point) conflicts.push('no_grounding_point')
+  if (samples > 1 && ground.agreement < 0.66) conflicts.push('low_grounding_agreement')
   let confidence = 0
   if (point && match.text && box) confidence = inside ? 0.95 : 0.45
   else if (point && match.text) confidence = 0.6
   else if (match.text) confidence = 0.35
   else if (point) confidence = 0.25
+  if (inside && samples > 1) {
+    if (ground.agreement >= 1) confidence = 0.98
+    else if (ground.agreement >= 0.66) confidence = 0.9
+    else confidence = Math.min(confidence, 0.7)
+  }
+  let descriptionCheck = null
+  const description = await nearestVisionDescription(out, t)
+  if (description && description.description) {
+    descriptionCheck = checkDescriptionWithOcr(description.description, ocr)
+    if (!descriptionCheck.consistent) {
+      conflicts.push('description_ocr_mismatch')
+      confidence = Math.min(confidence, 0.7)
+    }
+  }
   return {
     out,
     t: ocr.t,
     frame: ocr.frame,
     instruction,
+    samples,
     point,
     box,
     matchedText: match.text,
     inside,
     confidence,
     conflicts,
+    consensus: samples > 1 ? {
+      agreement: ground.agreement,
+      clusterSize: ground.clusterSize,
+      spreadPx: ground.spreadPx,
+      variants: ground.variants,
+    } : null,
+    descriptionCheck,
     agreement: {
       ocrLineMatched: Boolean(match.text),
       pointAvailable: Boolean(point),
@@ -1883,9 +2005,48 @@ async function fuseVisionEvidence(out, t, instruction) {
     },
     evidence: [
       { source: 'ocr', engine: ocr.engine, text: match.text, box, seconds: ocr.seconds || null, cached: Boolean(ocr.cached) },
-      { source: 'ui-tars', engine: ground.engine, point, raw: ground.raw || '', seconds: ground.seconds || null, cached: Boolean(ground.cached) },
+      {
+        source: 'ui-tars',
+        engine: ground.engine,
+        point,
+        raw: ground.raw || '',
+        seconds: ground.seconds || null,
+        cached: Boolean(ground.cached),
+      },
+      ...(descriptionCheck ? [{
+        source: 'vlm-description',
+        engine: 'vision.json',
+        description: description.description,
+        contradictions: descriptionCheck.contradictions,
+      }] : []),
     ],
   }
+}
+
+async function fuseToWorkItem(out, t, instruction, options = {}) {
+  const fused = await fuseVisionEvidence(out, t, instruction, { samples: options.samples || 3 })
+  const element = fused.matchedText || instruction
+  const detail = [
+    `目标「${instruction}」`,
+    `OCR 命中「${fused.matchedText || '—'}」${fused.box ? `框 ${fused.box.join(',')}` : '（无框）'}`,
+    `UI-TARS 点 ${fused.point ? fused.point.join(',') : '—'}`,
+    `点-框${fused.inside ? '命中' : '未命中'}`,
+    `置信度 ${fused.confidence}`,
+    `冲突：${fused.conflicts.length ? fused.conflicts.join(', ') : '无'}`,
+  ].join('；')
+  const item = {
+    title: options.title || `定位并核对：${element}`,
+    detail,
+    priority: fused.confidence >= 0.9 ? 'P1' : 'P2',
+    t0: fused.t,
+    t1: fused.t,
+    frame: fused.frame,
+    quote: fused.matchedText || '',
+    acceptance: 'UI-TARS 坐标落在 OCR 文本框内且融合置信度 ≥ 0.9',
+    source: 'fusion',
+  }
+  const exported = await exportWorkItems(out, 'tickets', [item], { title: options.title || `融合工单-${element}` })
+  return { ok: true, item, fused, export: exported }
 }
 
 function serveFrameImage(res, path) {
@@ -2105,6 +2266,7 @@ const fuseVisionTool = {
       out: { type: 'string', description: 'Event record output directory.' },
       t: { type: 'number', description: 'Seconds from the start of the recording.' },
       instruction: { type: 'string', description: 'Target element description, e.g. 商品价格 or 登录按钮.' },
+      samples: { type: 'number', description: 'Grounding samples (2-3) for paraphrased consensus; default 1.' },
     },
   },
   output: {
@@ -2113,7 +2275,32 @@ const fuseVisionTool = {
   },
   timeoutMs: 600000,
   async execute(args) {
-    return fuseVisionEvidence(args.out, args.t, args.instruction)
+    return fuseVisionEvidence(args.out, args.t, args.instruction, { samples: args.samples })
+  },
+}
+
+const fuseWorkItemTool = {
+  name: 'fuse_to_work_item',
+  description: 'Run fused evidence (OCR box + UI-TARS consensus) and append one ticket with the element, confidence, frame evidence and acceptance criteria. Returns the ticket and the export directory.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 't', 'instruction'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      t: { type: 'number', description: 'Seconds from the start of the recording.' },
+      instruction: { type: 'string', description: 'Target element description.' },
+      samples: { type: 'number', description: 'Consensus samples (default 3).' },
+      title: { type: 'string', description: 'Optional ticket title override.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 900000,
+  async execute(args) {
+    return fuseToWorkItem(args.out, args.t, args.instruction, { samples: args.samples, title: args.title })
   },
 }
 
@@ -2395,10 +2582,19 @@ function handler(req, res) {
       }
       return
     }
+    if (route === '/event-video/fuse-ticket' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await fuseToWorkItem(body.out, body.t, body.instruction, { samples: body.samples, title: body.title }))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
     if (route === '/event-video/fuse' && req.method === 'POST') {
       const body = await readBody(req)
       try {
-        sendJson(res, 200, await fuseVisionEvidence(body.out, body.t, body.instruction))
+        sendJson(res, 200, await fuseVisionEvidence(body.out, body.t, body.instruction, { samples: body.samples }))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -3043,6 +3239,7 @@ export function apply(ctx, config) {
   }
   if (OCR_ENABLED && GROUND_ENABLED) {
     ctx.effect(() => ctx.tools.register(fuseVisionTool), 'event-video: fuse tool')
+    ctx.effect(() => ctx.tools.register(fuseWorkItemTool), 'event-video: fuse ticket tool')
   }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
@@ -3101,6 +3298,10 @@ export const __test = {
   groundUiTool,
   fuseVisionEvidence,
   fuseVisionTool,
+  fuseToWorkItem,
+  fuseWorkItemTool,
+  groundConsensus,
+  checkDescriptionWithOcr,
   matchOcrTarget,
   describeRecord,
   callVlmDescription,
