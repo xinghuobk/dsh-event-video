@@ -2049,6 +2049,83 @@ async function fuseToWorkItem(out, t, instruction, options = {}) {
   return { ok: true, item, fused, export: exported }
 }
 
+function defaultPipelineTimes(event) {
+  const states = [...(event.states || [])].sort((a, b) => a.t0 - b.t0)
+  const times = new Set()
+  for (const state of [...states]
+    .sort((a, b) => (b.attention ? b.attention.emphasis : 0) - (a.attention ? a.attention.emphasis : 0))
+    .slice(0, 3)) {
+    times.add(state.t0)
+  }
+  for (const chapter of event.chapters || []) {
+    if (times.size >= 4) break
+    times.add(chapter.t0)
+  }
+  if (times.size === 0 && states.length > 0) times.add(states[0].t0)
+  return [...times].sort((a, b) => a - b)
+}
+
+async function runVisionPipeline(out, options = {}) {
+  if (!out || !insideRoots(out)) throw new Error('out is missing or outside allowed roots')
+  const event = await eventFor(out)
+  const started = Date.now()
+  const instructions = Array.isArray(options.instructions)
+    ? options.instructions.map((item) => String(item).trim()).filter(Boolean)
+    : []
+  const times = Array.isArray(options.times) && options.times.length > 0
+    ? options.times.map(Number).filter((value) => Number.isFinite(value) && value >= 0)
+    : defaultPipelineTimes(event)
+  const samples = Math.max(1, Math.min(3, Number(options.samples) || 3))
+  const stages = []
+  if (options.describe) {
+    const result = await describeRecord(out, { limit: options.describeLimit || 12 })
+    stages.push({ stage: 'describe', model: result.model, count: result.count, failed: result.failed })
+  }
+  if (options.think) {
+    const result = await describeRecord(out, { limit: options.thinkLimit || 4, keyFrames: true, think: true })
+    stages.push({ stage: 'think', model: result.model, count: result.count, failed: result.failed })
+  }
+  const tickets = []
+  if (instructions.length > 0) {
+    for (const t of times) {
+      for (const instruction of instructions) {
+        try {
+          const result = await fuseToWorkItem(out, t, instruction, { samples })
+          tickets.push({
+            t,
+            instruction,
+            confidence: result.fused.confidence,
+            point: result.fused.point,
+            box: result.fused.box,
+            conflicts: result.fused.conflicts,
+            ticket: result.item,
+            exportDir: result.export.dir,
+          })
+        } catch (error) {
+          tickets.push({ t, instruction, error: String(error.message) })
+        }
+      }
+    }
+    stages.push({
+      stage: 'fuse_tickets',
+      count: tickets.filter((item) => !item.error).length,
+      failed: tickets.filter((item) => item.error).length,
+    })
+  }
+  const data = {
+    version: 1,
+    ranAt: new Date().toISOString(),
+    out,
+    options: { instructions, times, samples, describe: Boolean(options.describe), think: Boolean(options.think) },
+    stages,
+    tickets,
+    seconds: Math.round((Date.now() - started) / 100) / 10,
+  }
+  const target = join(out, 'pipeline.json')
+  await fs.writeFile(target, JSON.stringify(data, null, 1))
+  return { ok: true, out, stages, tickets, seconds: data.seconds, path: target }
+}
+
 function serveFrameImage(res, path) {
   fs.stat(path).then((stat) => {
     res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': stat.size, 'cache-control': 'no-store' })
@@ -2276,6 +2353,38 @@ const fuseVisionTool = {
   timeoutMs: 600000,
   async execute(args) {
     return fuseVisionEvidence(args.out, args.t, args.instruction, { samples: args.samples })
+  },
+}
+
+const runPipelineTool = {
+  name: 'run_vision_pipeline',
+  description: 'Run a multi-stage vision pipeline on one record: optional batch descriptions, optional key-frame thinking, then fused OCR+UI-TARS evidence tickets for each instruction at key timestamps. Writes pipeline.json and exports tickets under exports/.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 'instructions'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      instructions: { type: 'array', items: { type: 'string' }, description: 'Element descriptions to locate and ticket (e.g. 商品价格, 购买按钮).' },
+      samples: { type: 'number', description: 'Grounding consensus samples 1-3 (default 3).' },
+      times: { type: 'array', items: { type: 'number' }, description: 'Optional timestamps; defaults to top-attention states + chapter starts.' },
+      describe: { type: 'boolean', description: 'Also run the batch VLM description stage.' },
+      think: { type: 'boolean', description: 'Also run the key-frame thinking stage.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 1800000,
+  async execute(args) {
+    return runVisionPipeline(args.out, {
+      instructions: args.instructions,
+      samples: args.samples,
+      times: args.times,
+      describe: args.describe,
+      think: args.think,
+    })
   },
 }
 
@@ -2577,6 +2686,18 @@ function handler(req, res) {
       const body = await readBody(req)
       try {
         sendJson(res, 200, await groundUiElement(body.out, body.t, body.instruction))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/pipeline' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await runVisionPipeline(body.out, {
+          instructions: body.instructions, samples: body.samples, times: body.times,
+          describe: body.describe, think: body.think,
+        }))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -3240,6 +3361,7 @@ export function apply(ctx, config) {
   if (OCR_ENABLED && GROUND_ENABLED) {
     ctx.effect(() => ctx.tools.register(fuseVisionTool), 'event-video: fuse tool')
     ctx.effect(() => ctx.tools.register(fuseWorkItemTool), 'event-video: fuse ticket tool')
+    ctx.effect(() => ctx.tools.register(runPipelineTool), 'event-video: pipeline tool')
   }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
@@ -3300,6 +3422,8 @@ export const __test = {
   fuseVisionTool,
   fuseToWorkItem,
   fuseWorkItemTool,
+  runVisionPipeline,
+  runPipelineTool,
   groundConsensus,
   checkDescriptionWithOcr,
   matchOcrTarget,

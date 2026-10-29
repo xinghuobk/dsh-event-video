@@ -154,6 +154,7 @@ npm install --install-links --legacy-peer-deps "file:/path/to/dsh-event-video/pl
 - 精确文字：`ocr_video_frame(out, t)` 调用配置的 OCR 命令（优先 PaddleOCR-VL，回退经典 PaddleOCR），按帧缓存，返回 `{engine,text,lines,frame}`；URL/小字以它为准，不要用 VLM 描述。
 - 证据融合：`fuse_vision_evidence(out, t, instruction, samples?)` 用 OCR 文本框校验 UI-TARS 定位点，可传 3 次指令改写做坐标共识，并检测 VLM 描述与 OCR 文本的矛盾；返回校准置信度、冲突和分专家证据。
 - 融合工单：`fuse_to_work_item(out, t, instruction, samples?, title?)` 把融合结果直接生成一张工单（元素、框、点、置信度、冲突、验收标准），输出到 `exports/`。
+- 流水线工具：`run_vision_pipeline(out, instructions, samples?, times?, describe?, think?)` 一次跑完描述/关键帧思考/融合工单（默认取注意力最高帧+章节起点），写 `pipeline.json`。
 - 看帧：`read_video_frame(out, t)` 返回该时间点的帧路径 + 画面标签/章节/邻近原话，模型再对路径调用 `read_image` 真正看图（播放器里的 **看帧** 按钮同源）。
 - 导出：`export_video_analysis(out)` 生成 `analysis.md`、`chapters.csv`、`analysis.docx`、`analysis.xlsx` 和原始 `event.json`（写到数据目录 `exports/`）；`summarize_video_analyses()` 一次性返回所有记录的总览（总量、审阅标记分布、跨记录注意力最高段落）；
 - 界面：侧栏「视频审阅」→ 审阅（播放器 + 同步转写）、总览（Gantt + 章节）、库（缩略图、搜索、标签、对比、队列、回收站）、汇总（所有分析一屏总览 + 一键导出）、摄像头。
