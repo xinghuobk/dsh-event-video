@@ -11,7 +11,7 @@
 - event-triggered voice: `speak_text` (SAPI / command / OpenAI-compatible TTS) and `camera_voice_react` (wait for wave/gesture/face event, speak a template, return event+tts), `enableVoice` switch, fake-TTS acceptance test
 - training-free evidence fusion: `fuse_vision_evidence` (OCR box + UI-TARS point cross-check, confidence/conflicts/evidence), OCR boxes in adapter, classic fallback on native crash
 - pipeline evidence tickets: `fuse_tickets` stage in `vision_pipeline.py` calls fusion for key frames and writes tickets per instruction (consensus + description check + export)
-- pipeline plugin tool: `run_vision_pipeline` tool + `/event-video/pipeline` route runs descriptions / key-frame thinking / fused tickets in one call and writes `pipeline.json`
+- player evidence-ticket control: instruction input + **证据工单** button with running/completed status on the review player`n- pipeline plugin tool: `run_vision_pipeline` tool + `/event-video/pipeline` route runs descriptions / key-frame thinking / fused tickets in one call and writes `pipeline.json`
 - multi-sample consensus: `samples:3` paraphrased grounding instructions clustered by coordinate (agreement/spread), confidence boost when inside OCR box
 - description consistency: VLM description entities checked against OCR text, contradictions flagged (`description_ocr_mismatch`)
 - fused ticket: `fuse_to_work_item` exports a ticket from fused evidence (element, box, point, confidence, conflicts, acceptance) under `exports/`

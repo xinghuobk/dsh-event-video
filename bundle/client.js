@@ -874,6 +874,37 @@ window.__ModuleLoader__.load({
         setAnnotations((data && data.annotations) || [])
         setVision((data && data.vision) || { descriptions: [] })
       }, [data])
+      const [pipelineInstruction, setPipelineInstruction] = useState('')
+      const [pipelineState, setPipelineState] = useState({ running: false, message: '' })
+      const runEvidencePipeline = () => {
+        const instructions = pipelineInstruction
+          .split(/[,，;；]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (instructions.length === 0) {
+          window.alert('先输入要定位的元素，例如：商品价格')
+          return
+        }
+        setPipelineState({ running: true, message: '运行中：OCR + UI-TARS 融合，生成工单…' })
+        fetch('/event-video/pipeline', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ out: record.out, instructions, samples: 3 }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) {
+            const tickets = value.tickets || []
+            const done = tickets.filter((item) => !item.error).length
+            const failed = tickets.filter((item) => item.error).length
+            setPipelineState({
+              running: false,
+              message: `完成：${done} 张工单${failed ? `，失败 ${failed}` : ''}（${value.seconds}s）`,
+            })
+            window.alert(`已生成 ${done} 张融合工单${failed ? `，失败 ${failed}` : ''}`)
+          } else {
+            setPipelineState({ running: false, message: value.error || '证据工单失败' })
+          }
+        }).catch(() => setPipelineState({ running: false, message: '证据工单请求失败' }))
+      }
       const describeKeyFrames = () => {
         fetch('/event-video/describe', {
           method: 'POST',
@@ -1072,6 +1103,19 @@ window.__ModuleLoader__.load({
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, 'SOP'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: describeKeyFrames }, '关键帧思考'),
+        h('input', {
+          className: 'dsev-input',
+          style: { maxWidth: 210 },
+          placeholder: '要定位的元素，如 商品价格',
+          value: pipelineInstruction,
+          onInput: (e) => setPipelineInstruction(e.target.value),
+        }),
+        h('button', {
+          type: 'button', className: 'dsev-btn', disabled: pipelineState.running, onClick: runEvidencePipeline,
+        }, '证据工单'),
+        pipelineState.message
+          ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, pipelineState.message)
+          : null,
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {
