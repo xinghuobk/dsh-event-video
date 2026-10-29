@@ -1712,15 +1712,15 @@ async function ocrFrame(out, t) {
   const cachePath = join(cacheDir, `${info.frame.split(/[\\/]/).pop()}.json`)
   try {
     const cached = JSON.parse(await fs.readFile(cachePath, 'utf8'))
-    if (cached && cached.engine) return { ...cached, out, t: info.t, frame: info.frame, cached: true }
+    if (cached && cached.engine && Array.isArray(cached.boxes)) return { ...cached, out, t: info.t, frame: info.frame, cached: true }
   } catch {
     /* first run */
   }
   const started = Date.now()
-  const result = await new Promise((resolveOcr) => {
+  const runOcr = (extra = []) => new Promise((resolveOcr) => {
     const args = [...OCR_ARGS]
     if (OCR_SCRIPT) args.push(OCR_SCRIPT)
-    args.push('--image', info.frame)
+    args.push('--image', info.frame, ...extra)
     const child = spawn(OCR_COMMAND, args, { windowsHide: true })
     let stdout = ''
     let stderr = ''
@@ -1730,6 +1730,11 @@ async function ocrFrame(out, t) {
     child.on('error', (error) => { clearTimeout(timer); resolveOcr({ code: -1, stdout, stderr: String(error) }) })
     child.on('close', (code) => { clearTimeout(timer); resolveOcr({ code, stdout, stderr }) })
   })
+  let result = await runOcr()
+  if (result.code !== 0) {
+    // PaddleOCR-VL can hit a native crash under memory pressure; retry with the classic pipeline.
+    result = await runOcr(['--classic'])
+  }
   if (result.code !== 0) throw new Error(`OCR command exited ${result.code}: ${result.stderr.slice(-300)}`)
   const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   let payload = {}
@@ -1751,6 +1756,7 @@ async function ocrFrame(out, t) {
     engine: payload.engine || 'unknown',
     text: payload.text || '',
     lines: Array.isArray(payload.lines) ? payload.lines : [],
+    boxes: Array.isArray(payload.boxes) ? payload.boxes : [],
     seconds: Math.round((Date.now() - started) / 100) / 10,
   }
 }
@@ -1809,6 +1815,76 @@ async function groundUiElement(out, t, instruction) {
     normalized: payload.normalized || null,
     raw: payload.raw || '',
     seconds: Math.round((Date.now() - started) / 100) / 10,
+  }
+}
+
+function matchOcrTarget(lines, boxes, instruction) {
+  const target = String(instruction || '').toLowerCase()
+  const tokens = target.match(/[a-z0-9$.,]+|[\u4e00-\u9fff]+/g) || []
+  const cjk = target.match(/[\u4e00-\u9fff]/g) || []
+  let bestIndex = -1
+  let bestScore = 0
+  const scan = Array.isArray(lines) ? lines : []
+  scan.forEach((line, index) => {
+    const norm = String(line || '').toLowerCase()
+    let score = 0
+    for (const token of tokens) {
+      if (token.length >= 2 && norm.includes(token)) score += token.length >= 4 ? 3 : 2
+    }
+    for (const char of cjk) {
+      if (norm.includes(char)) score += 0.5
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  })
+  if (bestIndex < 0 || bestScore <= 0) return { text: null, box: null, index: -1, score: 0 }
+  const box = Array.isArray(boxes) ? boxes[bestIndex] || null : null
+  return { text: scan[bestIndex], box, index: bestIndex, score: Math.round(bestScore * 10) / 10 }
+}
+
+async function fuseVisionEvidence(out, t, instruction) {
+  if (!OCR_ENABLED || !GROUND_ENABLED) throw new Error('fusion needs both OCR and grounding enabled')
+  if (!instruction) throw new Error('instruction is required')
+  const [ocr, ground] = await Promise.all([ocrFrame(out, t), groundUiElement(out, t, instruction)])
+  const match = matchOcrTarget(ocr.lines, ocr.boxes, instruction)
+  const point = ground.point || null
+  const box = match.box
+  const inside = Boolean(point && box
+    && point[0] >= box[0] && point[0] <= box[2]
+    && point[1] >= box[1] && point[1] <= box[3])
+  const conflicts = []
+  if (!match.text) conflicts.push('no_ocr_text_match')
+  if (match.text && !box) conflicts.push('no_ocr_box_for_match')
+  if (point && box && !inside) conflicts.push('point_outside_ocr_box')
+  if (!point) conflicts.push('no_grounding_point')
+  let confidence = 0
+  if (point && match.text && box) confidence = inside ? 0.95 : 0.45
+  else if (point && match.text) confidence = 0.6
+  else if (match.text) confidence = 0.35
+  else if (point) confidence = 0.25
+  return {
+    out,
+    t: ocr.t,
+    frame: ocr.frame,
+    instruction,
+    point,
+    box,
+    matchedText: match.text,
+    inside,
+    confidence,
+    conflicts,
+    agreement: {
+      ocrLineMatched: Boolean(match.text),
+      pointAvailable: Boolean(point),
+      pointInsideBox: inside,
+      matchScore: match.score,
+    },
+    evidence: [
+      { source: 'ocr', engine: ocr.engine, text: match.text, box, seconds: ocr.seconds || null, cached: Boolean(ocr.cached) },
+      { source: 'ui-tars', engine: ground.engine, point, raw: ground.raw || '', seconds: ground.seconds || null, cached: Boolean(ground.cached) },
+    ],
   }
 }
 
@@ -2015,6 +2091,29 @@ const ocrFrameTool = {
   timeoutMs: 320000,
   async execute(args) {
     return ocrFrame(args.out, args.t)
+  },
+}
+
+const fuseVisionTool = {
+  name: 'fuse_vision_evidence',
+  description: 'Training-free cross-check: OCR text+box (PaddleOCR-VL) against UI-TARS grounding point for a described element. Returns point, OCR box, whether the point falls inside the box, a calibrated confidence and explicit conflicts/evidence. Requires both OCR and grounding configured.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 't', 'instruction'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      t: { type: 'number', description: 'Seconds from the start of the recording.' },
+      instruction: { type: 'string', description: 'Target element description, e.g. 商品价格 or 登录按钮.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 600000,
+  async execute(args) {
+    return fuseVisionEvidence(args.out, args.t, args.instruction)
   },
 }
 
@@ -2291,6 +2390,15 @@ function handler(req, res) {
       const body = await readBody(req)
       try {
         sendJson(res, 200, await groundUiElement(body.out, body.t, body.instruction))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/fuse' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await fuseVisionEvidence(body.out, body.t, body.instruction))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -2933,6 +3041,9 @@ export function apply(ctx, config) {
   if (GROUND_ENABLED) {
     ctx.effect(() => ctx.tools.register(groundUiTool), 'event-video: ground tool')
   }
+  if (OCR_ENABLED && GROUND_ENABLED) {
+    ctx.effect(() => ctx.tools.register(fuseVisionTool), 'event-video: fuse tool')
+  }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
   if (ANNOTATIONS_ENABLED) {
@@ -2988,6 +3099,9 @@ export const __test = {
   ocrFrameTool,
   groundUiElement,
   groundUiTool,
+  fuseVisionEvidence,
+  fuseVisionTool,
+  matchOcrTarget,
   describeRecord,
   callVlmDescription,
   readVision,
