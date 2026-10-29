@@ -2116,7 +2116,7 @@ window.__ModuleLoader__.load({
       const [activeOut, setActiveOut] = useState(null)
       const [data, setData] = useState(null)
       const [dataError, setDataError] = useState(null)
-      const [view, setView] = useState('review')
+      const [view, setView] = useState('library')
 
       const reloadRecords = () => {
         fetch('/event-video/records')
@@ -2188,7 +2188,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-rec-meta' }, r.source || (r.video ? '有视频' : '无视频')))))
       const sideHead = h('div', { className: 'dsev-side-head' }, '视频库', h('span', { className: 'dsev-count' }, String(records.length)))
       const tabs = h('div', { className: 'dsev-tabs' },
-        [['review', '审阅'], ['overview', '总览'], ['library', '库'], ['summary', '汇总'], ['camera', '摄像头']].map(([key, label]) => h('button', {
+        [['library', '库'], ['review', '审阅'], ['overview', '总览'], ['summary', '汇总'], ['camera', '摄像头']].map(([key, label]) => h('button', {
           key, type: 'button',
           className: 'dsev-tab' + (view === key ? ' dsev-tab-on' : ''),
           onClick: () => setView(key),
@@ -2210,6 +2210,7 @@ window.__ModuleLoader__.load({
           ? h('span', { className: 'dsev-badge' }, `审阅 ${data.event.review.flags.length}`)
           : null,
         h('div', { className: 'dsev-topbar-actions' },
+          view === 'review' ? h('button', { type: 'button', className: 'dsev-btn', onClick: () => setView('library') }, '← 库') : null,
           active ? h('button', { type: 'button', className: 'dsev-btn', onClick: renameActive }, '改名') : null,
           active ? h('button', { type: 'button', className: 'dsev-btn', onClick: revealActive }, '目录') : null,
           active ? h('button', { type: 'button', className: 'dsev-btn', onClick: deleteActive }, '删除') : null,
@@ -2230,8 +2231,13 @@ window.__ModuleLoader__.load({
           }))
           : active === null
             ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-empty' },
-              h('h3', null, '视频库是空的'),
-              h('div', null, '先用 build_video_event 构建一个视频事件记录，完成后这里会出现缩略图。')))
+              h('h3', null, records.length > 0 ? '从库中选择一条记录' : '视频库是空的'),
+              h('div', null, records.length > 0
+                ? '点击「库」中的记录卡片进入审阅。'
+                : '先用 build_video_event 构建一个视频事件记录，完成后这里会出现缩略图。'),
+              records.length > 0
+                ? h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: () => setView('library') }, '去库页')
+                : null))
             : dataError
               ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-error' }, '无法加载事件数据：', dataError))
               : data
