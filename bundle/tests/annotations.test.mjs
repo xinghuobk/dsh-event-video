@@ -41,6 +41,14 @@ const updated = await __test.updateAnnotation(out, added.annotation.id, { text: 
 assert.equal(updated.annotation.text, '改过的标注')
 assert.equal(updated.annotation.frame, 'f_000006.jpg')
 
+const resolved = await __test.updateAnnotation(out, added.annotation.id, { resolved: true })
+assert.equal(resolved.annotation.resolved, true)
+const openItem = await __test.addAnnotation(out, { t0: 2, text: '仍待处理的问题' })
+const workItems = await __test.workItemsFromRecord(out)
+assert.ok(workItems.some((item) => item.title === '仍待处理的问题'), 'unresolved annotation becomes a work item')
+assert.ok(!workItems.some((item) => item.title === '改过的标注'), 'resolved annotation is excluded')
+assert.equal(__test.resolveAnnotationTool.name, 'resolve_video_annotation')
+
 const record = __test.recordFromEvent(event, out, 'Demo record')
 const markdown = __test.recordMarkdown(record, event, (await __test.readAnnotations(out)).annotations)
 assert.ok(markdown.includes('## 标注'))
@@ -52,6 +60,8 @@ await assert.rejects(() => __test.addAnnotation(join(home, '..', 'outside'), { t
 await assert.rejects(() => __test.deleteAnnotation(out, 'missing-id'), /not found/)
 
 const removed = await __test.deleteAnnotation(out, added.annotation.id)
-assert.equal(removed.annotations.length, 0)
+assert.equal(removed.annotations.length, 1)
+const removedOpen = await __test.deleteAnnotation(out, openItem.annotation.id)
+assert.equal(removedOpen.annotations.length, 0)
 
 console.log('ANNOTATIONS OK')

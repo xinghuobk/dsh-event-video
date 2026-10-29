@@ -533,6 +533,28 @@ window.__ModuleLoader__.load({
         transform: translateY(-3px);
         box-shadow: 0 16px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(124, 140, 255, 0.28);
       }
+      /* Frame.io-style timecoded comment cards */
+      .dsev-comment-filter { display: flex; gap: 6px; margin-bottom: 10px; }
+      .dsev-filter-chip {
+        border: 0.5px solid var(--dsev-border); background: transparent; color: var(--dsev-text-3);
+        font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+      }
+      .dsev-filter-chip:hover { color: var(--dsev-text-1); }
+      .dsev-filter-chip-on { color: var(--dsev-text-1); border-color: rgba(124, 140, 255, 0.5); background: rgba(124, 140, 255, 0.12); }
+      .dsev-comment {
+        border: 0.5px solid var(--dsev-border); border-radius: 12px; padding: 10px 12px;
+        margin-bottom: 8px; background: var(--dsev-surface);
+      }
+      .dsev-comment-done { opacity: 0.6; }
+      .dsev-comment-head { display: flex; align-items: center; gap: 8px; }
+      .dsev-comment-author { font-size: 12px; color: var(--dsev-text-3); }
+      .dsev-comment-status {
+        font-size: 11px; color: var(--dsev-text-3);
+        border: 0.5px solid var(--dsev-border); border-radius: 999px; padding: 1px 8px;
+      }
+      .dsev-comment-done .dsev-comment-status { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); }
+      .dsev-comment-body { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--dsev-text-2); }
+      .dsev-comment-toggle { font-size: 12px; }
       .dsev-lib-card img { transition: transform 0.35s ease, filter 0.35s ease; }
       .dsev-lib-card:hover img { transform: scale(1.04); filter: saturate(1.1) brightness(1.03); }
       .dsev-video-wrap { box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.04); transition: box-shadow 0.3s ease; }
@@ -1046,6 +1068,7 @@ window.__ModuleLoader__.load({
       const [showAiTools, setShowAiTools] = useState(false)
       const [reviewTab, setReviewTab] = useState('chapters')
       const [note, setNote] = useState('')
+      const [annotationFilter, setAnnotationFilter] = useState('open')
       const runEvidencePipeline = () => {
         const instructions = pipelineInstruction
           .split(/[,，;；]/)
@@ -1165,6 +1188,21 @@ window.__ModuleLoader__.load({
           if (value.ok) setAnnotations(value.annotations)
           else setNote(value.error || '删除失败')
         }).catch(() => setNote('删除失败'))
+      }
+      const toggleResolved = (annotation) => {
+        fetch('/event-video/annotations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            out: record.out,
+            action: 'update',
+            id: annotation.id,
+            patch: { resolved: !annotation.resolved },
+          }),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) setAnnotations(value.annotations)
+          else setNote(value.error || '状态更新失败')
+        }).catch(() => setNote('状态更新失败'))
       }
       const review = data ? data.review : null
       const chapters = event && Array.isArray(event.chapters) ? event.chapters : []
@@ -1404,16 +1442,58 @@ window.__ModuleLoader__.load({
       const reviewTabs = [
         ['chapters', `章节 ${chapters.length}`],
         ['transcript', `转写 ${windowUnits.length}`],
-        ['annotations', `标注 ${annotations.length}`],
+        ['annotations', `标注 ${annotations.filter((item) => !item.resolved).length}/${annotations.length}`],
         ['descriptions', `描述 ${(vision.descriptions || []).length}`],
         ['flags', `标记 ${reviewFlags.length}`],
       ]
+      const openAnnotations = annotations.filter((item) => !item.resolved)
+      const doneAnnotations = annotations.filter((item) => item.resolved)
+      const filteredAnnotations = annotationFilter === 'open'
+        ? openAnnotations
+        : annotationFilter === 'done'
+          ? doneAnnotations
+          : annotations
+      const annotationFilterBar = annotations.length === 0
+        ? null
+        : h('div', { className: 'dsev-comment-filter' },
+          [
+            ['open', `未完成 ${openAnnotations.length}`],
+            ['done', `已完成 ${doneAnnotations.length}`],
+            ['all', `全部 ${annotations.length}`],
+          ].map(([key, label]) => h('button', {
+            key, type: 'button',
+            className: 'dsev-filter-chip' + (annotationFilter === key ? ' dsev-filter-chip-on' : ''),
+            onClick: () => setAnnotationFilter(key),
+          }, label)))
       const annotationsPanel = annotations.length === 0
         ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
-        : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
-          h('button', { type: 'button', className: 'dsev-time dsev-time-btn', onClick: () => seek(annotation.t0) }, fmt(annotation.t0)),
-          h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))
+        : [
+          annotationFilterBar,
+          ...[...filteredAnnotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', {
+            className: 'dsev-comment' + (annotation.resolved ? ' dsev-comment-done' : ''),
+            key: annotation.id,
+          },
+          h('div', { className: 'dsev-comment-head' },
+            h('button', {
+              type: 'button', className: 'dsev-time dsev-time-btn',
+              onClick: () => seek(annotation.t0),
+            }, fmt(annotation.t0)),
+            h('span', { className: 'dsev-comment-author' }, annotation.author || 'user'),
+            h('span', { className: 'dsev-comment-status' }, annotation.resolved ? '已完成' : '待处理'),
+            h('span', { className: 'dsev-grow' }),
+            h('button', {
+              type: 'button', className: 'dsev-btn dsev-comment-toggle',
+              onClick: () => toggleResolved(annotation),
+            }, annotation.resolved ? '重新打开' : '标记完成'),
+            h('button', {
+              type: 'button', className: 'dsev-btn',
+              onClick: () => removeAnnotation(annotation.id),
+            }, '删除')),
+          h('div', { className: 'dsev-comment-body' }, annotation.text))),
+          filteredAnnotations.length === 0
+            ? h('div', { className: 'dsev-detail-empty' }, annotationFilter === 'open' ? '没有未完成的标注' : '没有已完成的标注')
+            : null,
+        ]
       const descriptionsPanel = (vision.descriptions || []).length === 0
         ? h('div', { className: 'dsev-detail-empty' }, '没有描述：展开 AI 工具后点「描述画面」')
         : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },

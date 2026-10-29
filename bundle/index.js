@@ -385,6 +385,7 @@ async function workItemsFromRecord(out) {
   const flags = Array.isArray(review.flags) ? review.flags : []
   const items = []
   for (const annotation of annotations) {
+    if (annotation.resolved) continue
     items.push({
       title: annotation.text,
       detail: `来自 ${fmtClock(annotation.t0)} 的标注（${annotation.author || 'user'}）`,
@@ -546,6 +547,7 @@ function normalizeAnnotation(input) {
     t1: Math.max(t0, t1),
     text,
     author: String(input.author || 'user').slice(0, 40),
+    resolved: Boolean(input.resolved),
     createdAt: new Date().toISOString(),
   }
 }
@@ -2744,6 +2746,7 @@ const annotateTool = {
       t1: { type: 'number', description: 'Optional end time in seconds.' },
       text: { type: 'string', description: 'Annotation text (max 500 chars).' },
       kind: { type: 'string', enum: ['note', 'label'], description: 'note or chapter label (default note).' },
+      resolved: { type: 'boolean', description: 'Mark the annotation as resolved (default false).' },
     },
   },
   output: {
@@ -2753,6 +2756,29 @@ const annotateTool = {
   timeoutMs: 20000,
   async execute(args) {
     return addAnnotation(args.out, { ...args, author: 'agent' })
+  },
+}
+
+const resolveAnnotationTool = {
+  name: 'resolve_video_annotation',
+  description: 'Mark a timestamped annotation as resolved (or reopen it). Only annotations.json is written; event.json is never modified.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 'id', 'resolved'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      id: { type: 'string', description: 'Annotation id.' },
+      resolved: { type: 'boolean', description: 'true to mark resolved, false to reopen.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 20000,
+  async execute(args) {
+    return updateAnnotation(args.out, args.id, { resolved: Boolean(args.resolved) })
   },
 }
 
@@ -3622,6 +3648,7 @@ export function apply(ctx, config) {
   if (ANNOTATIONS_ENABLED) {
     ctx.effect(() => ctx.tools.register(annotateTool), 'event-video: annotate tool')
     ctx.effect(() => ctx.tools.register(listAnnotationsTool), 'event-video: annotations tool')
+  ctx.effect(() => ctx.tools.register(resolveAnnotationTool), 'event-video: resolve annotation tool')
   }
   if (WORK_ITEMS_ENABLED) {
     ctx.effect(() => ctx.tools.register(exportWorkItemsTool), 'event-video: work items tool')
@@ -3665,6 +3692,7 @@ export const __test = {
   recordMarkdown,
   exportWorkItems,
   workItemsFromRecord,
+  resolveAnnotationTool,
   normalizeWorkItems,
   planVisionFrames,
   planKeyVisionFrames,
