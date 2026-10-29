@@ -1,0 +1,14 @@
+{
+  "record": "D:/agent/video-events/orimodo-analyze",
+  "stages": [
+    {
+      "id": "evidence-tickets",
+      "kind": "fuse_tickets",
+      "depends_on": [],
+      "frames": [2786],
+      "instructions": ["商品价格 $220.00"],
+      "samples": 3,
+      "title": "商品页证据工单"
+    }
+  ]
+}

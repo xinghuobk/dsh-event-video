@@ -110,11 +110,38 @@ Measured on `review-test`:
 
 At the end `ollama ps` is empty; results land in `pipeline.json` and are reusable.
 
+### Evidence ticket stage
+
+`kind: "fuse_tickets"` calls the plugin's fusion endpoint for key frames and writes one ticket per instruction. It composes the training-free fusion from [VISION.md](VISION.md): OCR box + UI-TARS 3-sample consensus + VLM-description/OCR contradiction check.
+
+```json
+{
+  "record": "D:/agent/video-events/orimodo-analyze",
+  "stages": [{
+    "id": "evidence-tickets",
+    "kind": "fuse_tickets",
+    "frames": [2786],
+    "instructions": ["商品价格 $220.00"],
+    "samples": 3,
+    "title": "商品页证据工单"
+  }]
+}
+```
+
+```bash
+python scripts/vision_pipeline.py \
+  --record D:/agent/video-events/orimodo-analyze \
+  --spec specs/evidence-tickets.json \
+  --base-url http://127.0.0.1:61945
+```
+
+Measured: `confidence=0.98`, point `[575,264]` inside OCR box `[539,251,616,272]`, conflict-free, ticket exported to `exports/tickets-商品页证据工单-*/`. Stages are checkpointed in `pipeline.json` and fusion/ground caches make a re-run instant.
+
 ## 8. What is still missing
 
 - plugin tool `run_vision_pipeline` + `/event-video/pipeline` route (prototype is a CLI);
 - progress events per stage in the UI;
-- HF provider adapter (PaddleOCR-VL, UI-TARS) behind the same stage interface;
+- HF provider adapter (PaddleOCR-VL, UI-TARS) behind the same stage interface (currently the fusion stage calls the plugin endpoints);
 - model registry/config (`models.json`) instead of hard-coded names in specs;
 - scheduler policies for multiple records (fairness, deadlines, preemption between stages).
 

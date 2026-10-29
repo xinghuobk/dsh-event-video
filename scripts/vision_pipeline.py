@@ -121,6 +121,15 @@ def call_model(model: str, prompt: str, image_path: Path, think: bool) -> tuple[
     return (data.get("message", {}).get("content") or ""), time.time() - started
 
 
+def post_json(url: str, body: dict, timeout: int = 900) -> dict:
+    request = urllib.request.Request(
+        url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def cache_key(record: Path, frame: Path, model: str, prompt: str, think: bool) -> str:
     digest = hashlib.sha1()
     digest.update(frame.read_bytes())
@@ -133,6 +142,8 @@ def main() -> int:
     parser.add_argument("--record", required=True)
     parser.add_argument("--spec", required=True)
     parser.add_argument("--min-free-mb", type=float, default=1500)
+    parser.add_argument("--base-url", default="http://127.0.0.1:61945",
+                        help="DSH web base URL for fusion/ticket stages")
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
 
@@ -151,6 +162,41 @@ def main() -> int:
                 raise SystemExit(f"unknown dependency {dependency}")
             if dependency not in state["stages"]:
                 raise SystemExit(f"stage {stage_id} depends on incomplete {dependency}")
+
+        if stage["kind"] == "fuse_tickets":
+            base = stage.get("baseUrl") or args.base_url
+            frames = stage.get("frames") or [0]
+            instructions = stage.get("instructions") or []
+            if not instructions:
+                raise SystemExit(f"stage {stage_id} needs instructions")
+            samples = int(stage.get("samples") or 3)
+            print(f"\n=== stage {stage_id} [fuse_tickets] samples={samples} instructions={len(instructions)} ===")
+            results = []
+            for t in frames:
+                for instruction in instructions:
+                    try:
+                        res = post_json(base.rstrip("/") + "/event-video/fuse-ticket", {
+                            "out": str(record), "t": t, "instruction": instruction,
+                            "samples": samples, "title": stage.get("title"),
+                        })
+                        fused = res.get("fused") or {}
+                        results.append({
+                            "t": t, "instruction": instruction,
+                            "confidence": fused.get("confidence"),
+                            "point": fused.get("point"),
+                            "box": fused.get("box"),
+                            "conflicts": fused.get("conflicts") or [],
+                            "ticket": res.get("item"),
+                            "exportDir": (res.get("export") or {}).get("dir"),
+                        })
+                        print(f"  t={t} {instruction}: confidence={results[-1]['confidence']} "
+                              f"conflicts={results[-1]['conflicts']} export={results[-1]['exportDir']}")
+                    except Exception as error:  # noqa: BLE001 - one item must not stop the stage
+                        results.append({"t": t, "instruction": instruction, "error": str(error)})
+                        print(f"  t={t} {instruction}: ERROR {error}")
+            state["stages"][stage_id] = {"status": "done", "kind": "fuse_tickets", "results": results}
+            out_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+            continue
 
         model = stage["model"]
         prompt = stage.get("prompt", "请用中文客观描述这张截图。")
