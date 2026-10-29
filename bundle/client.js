@@ -605,6 +605,23 @@ window.__ModuleLoader__.load({
       .dsev-home-row-meta { font-size: 12px; color: var(--dsev-text-3); margin-top: 2px; }
       .dsev-home-row-open { color: var(--dsev-text-3); display: flex; }
       .dsev-tab { display: inline-flex; align-items: center; gap: 6px; }
+      /* --- settings --- */
+      .dsev-settings { display: flex; flex-direction: column; gap: 14px; max-width: 920px; }
+      .dsev-settings-head h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
+      .dsev-settings-head p { margin: 6px 0 0; color: var(--dsev-text-3); font-size: 13.5px; }
+      .dsev-settings-card {
+        border: 0.5px solid var(--dsev-border); border-radius: 14px; padding: 16px 18px;
+        background: var(--dsev-surface); display: flex; flex-direction: column; gap: 10px;
+      }
+      .dsev-settings-title { font-size: 15px; font-weight: 600; }
+      .dsev-settings-choice { display: flex; gap: 18px; flex-wrap: wrap; }
+      .dsev-settings-row { display: flex; align-items: center; gap: 10px; font-size: 13px; min-height: 26px; }
+      .dsev-settings-label { color: var(--dsev-text-3); min-width: 120px; }
+      .dsev-settings-value { color: var(--dsev-text-2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dsev-settings-status { font-size: 11.5px; color: var(--dsev-text-3); border: 0.5px solid var(--dsev-border); border-radius: 999px; padding: 1px 8px; }
+      .dsev-settings-status-ok { color: #4ade80; border-color: rgba(74, 222, 128, 0.35); }
+      .dsev-settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      .dsev-settings-note { font-size: 12.5px; color: var(--dsev-text-3); line-height: 1.6; }
       .dsev-btn { display: inline-flex; align-items: center; gap: 6px; }
       .dsev-btn svg { flex: none; }
       /* --- friendlier library chrome --- */
@@ -2438,6 +2455,9 @@ window.__ModuleLoader__.load({
         sparkle: h('path', { d: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z' }),
         video: h('g', null, h('rect', { x: 3, y: 6, width: 13, height: 12, rx: 2 }), h('path', { d: 'm16 10 5-3v10l-5-3' })),
         menu: h('path', { d: 'M4 7h16M4 12h16M4 17h16' }),
+        gear: h('g', null,
+          h('circle', { cx: 12, cy: 12, r: 3 }),
+          h('path', { d: 'M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1Z' })),
       }
       return h('svg', {
         width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
@@ -2514,6 +2534,102 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'dsev-home-row-open' }, h(Icon, { name: 'play', size: 15 })))))))
     }
 
+    function SettingsView({ onOpenCamera }) {
+      const [settings, setSettings] = useState(null)
+      const [note, setNote] = useState('')
+      useEffect(() => {
+        let alive = true
+        fetch('/event-video/settings')
+          .then((r) => r.json())
+          .then((data) => { if (alive) setSettings(data) })
+          .catch(() => { if (alive) setNote('无法读取设置') })
+        return () => { alive = false }
+      }, [])
+      const save = (patch) => {
+        fetch('/event-video/settings', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(patch),
+        }).then((r) => r.json()).then((value) => {
+          if (value.ok) {
+            setSettings((prev) => ({ ...prev, prefs: value.prefs }))
+            setNote('已保存')
+          } else {
+            setNote(value.error || '保存失败')
+          }
+        }).catch(() => setNote('保存失败'))
+      }
+      const openFolder = (kind) => {
+        fetch('/event-video/open-folder', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ kind }),
+        }).then((r) => r.json()).then((value) => {
+          setNote(value.ok ? '已打开文件夹' : (value.error || '打开失败'))
+        }).catch(() => setNote('打开失败'))
+      }
+      const calibrate = () => {
+        setNote('正在校准摄像头，请正对镜头…')
+        fetch('/camera/calibrate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ seconds: 15 }),
+        }).then((r) => r.json()).then((value) => {
+          setNote(value.ok ? '校准完成，表情阈值已更新' : (value.error || '校准失败'))
+        }).catch(() => setNote('校准失败'))
+      }
+      if (!settings) return h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-note' }, '读取设置…'))
+      const status = (ok) => h('span', { className: 'dsev-settings-status' + (ok ? ' dsev-settings-status-ok' : '') }, ok ? '已配置' : '未配置')
+      const row = (label, value) => h('div', { className: 'dsev-settings-row' },
+        h('span', { className: 'dsev-settings-label' }, label),
+        h('span', { className: 'dsev-settings-value' }, value))
+      return h('div', { className: 'dsev-settings' },
+        h('div', { className: 'dsev-settings-head' },
+          h('h1', null, '设置'),
+          h('p', null, '启动方式、数据位置和已配置的能力。')),
+        h('section', { className: 'dsev-settings-card' },
+          h('div', { className: 'dsev-settings-title' }, '启动'),
+          h('div', { className: 'dsev-settings-choice' },
+            [['home', '打开首页'], ['library', '打开视频库']].map(([value, label]) => h('label', { key: value, className: 'dsev-check' },
+              h('input', {
+                type: 'radio', name: 'defaultView', checked: (settings.prefs.defaultView || 'home') === value,
+                onChange: () => save({ defaultView: value }),
+              }), label))),
+          h('button', {
+            type: 'button', className: 'dsev-btn', style: { marginTop: 10 },
+            onClick: () => {
+              try { window.localStorage.removeItem('dsev-onboard-dismissed') } catch { /* ignore */ }
+              save({ onboardingDismissed: false })
+              setNote('已恢复首次引导（刷新后可见）')
+            },
+          }, '恢复首次引导')),
+        h('section', { className: 'dsev-settings-card' },
+          h('div', { className: 'dsev-settings-title' }, '数据'),
+          row('数据目录', settings.dataHome),
+          row('记录目录', settings.recordsDir),
+          row('导出目录', settings.exportsDir),
+          h('div', { className: 'dsev-settings-actions' },
+            h('button', { type: 'button', className: 'dsev-btn', onClick: () => openFolder('home') }, '打开数据目录'),
+            h('button', { type: 'button', className: 'dsev-btn', onClick: () => openFolder('exports') }, '打开导出目录'))),
+        h('section', { className: 'dsev-settings-card' },
+          h('div', { className: 'dsev-settings-title' }, '智能能力'),
+          h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '画面解读模型'), h('span', { className: 'dsev-settings-value' }, settings.ai.vlmModel || '—'), status(settings.ai.vlmConfigured)),
+          h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '关键帧思考模型'), h('span', { className: 'dsev-settings-value' }, settings.ai.vlmThinkModel || '—'), status(settings.ai.vlmConfigured)),
+          h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '精确文字识别'), h('span', { className: 'dsev-settings-value' }, ''), status(settings.ai.ocrConfigured)),
+          h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '元素定位'), h('span', { className: 'dsev-settings-value' }, ''), status(settings.ai.groundConfigured))),
+        h('section', { className: 'dsev-settings-card' },
+          h('div', { className: 'dsev-settings-title' }, '摄像头'),
+          row('手势/表情信号', settings.features.cameraSignals ? '已启用' : '未启用'),
+          h('div', { className: 'dsev-settings-actions' },
+            h('button', { type: 'button', className: 'dsev-btn', onClick: onOpenCamera }, '打开摄像头页'),
+            h('button', { type: 'button', className: 'dsev-btn', onClick: calibrate }, '校准表情'))),
+        h('section', { className: 'dsev-settings-card' },
+          h('div', { className: 'dsev-settings-title' }, '关于'),
+          row('版本', settings.version || '—'),
+          h('div', { className: 'dsev-settings-note' }, '所有数据保存在本机数据目录；删除记录会进入回收站，可恢复。')),
+        note ? h('div', { className: 'dsev-inline-note', style: { marginTop: 4 } }, note) : null)
+    }
+
     function UnifiedPanel() {
       const [records, setRecords] = useState([])
       const [error, setError] = useState(null)
@@ -2536,6 +2652,17 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         reloadRecords()
+      }, [])
+
+      useEffect(() => {
+        let alive = true
+        fetch('/event-video/settings')
+          .then((r) => r.json())
+          .then((settings) => {
+            if (alive && settings && settings.prefs && settings.prefs.defaultView === 'library') setView('library')
+          })
+          .catch(() => {})
+        return () => { alive = false }
       }, [])
 
       useEffect(() => {
@@ -2593,7 +2720,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-rec-meta' }, r.source || (r.video ? '有视频' : '无视频')))))
       const sideHead = h('div', { className: 'dsev-side-head' }, '视频库', h('span', { className: 'dsev-count' }, String(records.length)))
       const tabs = h('div', { className: 'dsev-tabs' },
-        [['home', '首页', 'home'], ['library', '视频库', 'library'], ['review', '查看', 'play']].map(([key, label, icon]) => h('button', {
+        [['home', '首页', 'home'], ['library', '视频库', 'library'], ['review', '查看', 'play'], ['settings', '设置', 'gear']].map(([key, label, icon]) => h('button', {
           key, type: 'button',
           className: 'dsev-tab' + (view === key ? ' dsev-tab-on' : ''),
           onClick: () => setView(key),
@@ -2609,7 +2736,7 @@ window.__ModuleLoader__.load({
         h('option', { value: 'summary' }, '汇总'),
         h('option', { value: 'camera' }, '摄像头')))
       const header = h('div', { className: 'dsev-topbar' },
-        records.length > 0 && view !== 'home'
+        records.length > 0 && view !== 'home' && view !== 'settings'
           ? h('select', {
             className: 'dsev-record-select',
             value: activeOut || '',
@@ -2626,9 +2753,9 @@ window.__ModuleLoader__.load({
           : null,
         h('div', { className: 'dsev-topbar-actions' },
           view === 'review' ? h('button', { type: 'button', className: 'dsev-btn', onClick: () => setView('library') }, '← 库') : null,
-          view !== 'home' && active ? h('button', { type: 'button', className: 'dsev-btn', onClick: renameActive }, '改名') : null,
-          view !== 'home' && active ? h('button', { type: 'button', className: 'dsev-btn', onClick: revealActive }, '目录') : null,
-          view !== 'home' && active ? h('button', { type: 'button', className: 'dsev-btn', onClick: deleteActive }, '删除') : null,
+          view !== 'home' && view !== 'settings' && active ? h('button', { type: 'button', className: 'dsev-btn', onClick: renameActive }, '改名') : null,
+          view !== 'home' && view !== 'settings' && active ? h('button', { type: 'button', className: 'dsev-btn', onClick: revealActive }, '目录') : null,
+          view !== 'home' && view !== 'settings' && active ? h('button', { type: 'button', className: 'dsev-btn', onClick: deleteActive }, '删除') : null,
           data && data.review && data.review.video
             ? h('span', { className: 'dsev-meta' }, data.review.video.split(/[\\/]/).pop())
             : null))
@@ -2641,6 +2768,8 @@ window.__ModuleLoader__.load({
             onGoLibrary: () => setView('library'),
             onAdd: () => { setView('library'); setBuildRequest(true) },
           }))
+        : view === 'settings'
+          ? h('div', { className: 'dsev-page' }, h(SettingsView, { onOpenCamera: () => setView('camera') }))
         : view === 'camera'
           ? h(CameraPanel, null)
           : view === 'summary'

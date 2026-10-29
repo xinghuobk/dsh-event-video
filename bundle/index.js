@@ -1080,6 +1080,74 @@ async function handleDelete(req, res) {
   sendJson(res, 200, { ok: true, hard: body.hard === true })
 }
 
+function userSettingsPath() {
+  return join(HOME, 'settings.json')
+}
+
+async function readUserSettings() {
+  try {
+    return JSON.parse(await fs.readFile(userSettingsPath(), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+async function writeUserSettings(patch) {
+  const current = await readUserSettings()
+  const next = { ...current, ...patch }
+  await fs.mkdir(HOME, { recursive: true })
+  await fs.writeFile(userSettingsPath(), JSON.stringify(next, null, 1))
+  return next
+}
+
+async function buildSettings() {
+  let version = ''
+  try {
+    version = JSON.parse(await fs.readFile(join(PACKAGE_DIR, 'package.json'), 'utf8')).version || ''
+  } catch {
+    version = ''
+  }
+  return {
+    version,
+    dataHome: HOME,
+    recordsDir: RECORDS_DIR,
+    exportsDir: join(HOME, 'exports'),
+    prefs: await readUserSettings(),
+    ai: {
+      vlmConfigured: Boolean(VLM_ENDPOINT),
+      vlmModel: VLM_MODEL,
+      vlmThinkModel: VLM_THINK_MODEL,
+      ocrConfigured: Boolean(OCR_COMMAND),
+      groundConfigured: Boolean(GROUND_COMMAND),
+      groundEndpoint: GROUND_ENDPOINT,
+    },
+    features: {
+      annotations: ANNOTATIONS_ENABLED,
+      workItems: WORK_ITEMS_ENABLED,
+      vlm: VLM_ENABLED,
+      ocr: OCR_ENABLED,
+      grounding: GROUND_ENABLED,
+      cameraSignals: CAMERA_SIGNALS,
+      voice: VOICE_ENABLED,
+    },
+  }
+}
+
+async function openFolder(kind) {
+  const allowed = {
+    home: HOME,
+    exports: join(HOME, 'exports'),
+    batches: join(HOME, 'batches'),
+    records: RECORDS_DIR,
+  }
+  const target = allowed[kind]
+  if (!target) throw new Error('unknown folder')
+  if (!insideRoots(target) && !target.startsWith(HOME)) throw new Error('folder outside data home')
+  const child = spawn('explorer.exe', [target], { detached: true, stdio: 'ignore' })
+  child.unref()
+  return { ok: true, path: target }
+}
+
 async function handleReveal(req, res) {
   const body = await readBody(req)
   if (!body.out || !insideRoots(body.out)) {
@@ -3128,6 +3196,33 @@ function handler(req, res) {
     }
     if (route === '/event-video/restore' && req.method === 'POST') {
       await handleRestore(req, res)
+      return
+    }
+    if (route === '/event-video/settings') {
+      if (req.method === 'GET') {
+        sendJson(res, 200, await buildSettings())
+        return
+      }
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        const patch = {}
+        if (body.defaultView === 'home' || body.defaultView === 'library') patch.defaultView = body.defaultView
+        if (typeof body.onboardingDismissed === 'boolean') patch.onboardingDismissed = body.onboardingDismissed
+        try {
+          sendJson(res, 200, { ok: true, prefs: await writeUserSettings(patch) })
+        } catch (error) {
+          sendJson(res, 500, { error: String(error.message) })
+        }
+        return
+      }
+    }
+    if (route === '/event-video/open-folder' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await openFolder(String(body.kind || 'home')))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
       return
     }
     if (route === '/camera/status') {
