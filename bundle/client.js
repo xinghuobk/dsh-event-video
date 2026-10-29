@@ -555,6 +555,22 @@ window.__ModuleLoader__.load({
       .dsev-comment-done .dsev-comment-status { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); }
       .dsev-comment-body { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--dsev-text-2); }
       .dsev-comment-toggle { font-size: 12px; }
+      /* --- friendlier library chrome --- */
+      .dsev-lib-hero { margin: 2px 0 14px; }
+      .dsev-lib-hero-title { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+      .dsev-lib-hero-sub { font-size: 13.5px; color: var(--dsev-text-3); margin-top: 4px; }
+      .dsev-lib-status { font-size: 11.5px; color: var(--dsev-text-3); border: 0.5px solid var(--dsev-border); border-radius: 999px; padding: 1px 8px; }
+      .dsev-lib-status-ok { color: #4ade80; border-color: rgba(74, 222, 128, 0.35); }
+      .dsev-advanced { margin-top: 8px; }
+      .dsev-advanced summary { font-size: 12px; color: var(--dsev-text-3); cursor: pointer; }
+      .dsev-advanced summary:hover { color: var(--dsev-text-1); }
+      .dsev-advanced-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+      .dsev-empty-start {
+        border: 1px dashed var(--dsev-border); border-radius: 14px; padding: 22px;
+        margin-top: 12px; background: var(--dsev-surface);
+      }
+      .dsev-empty-start-title { font-size: 15px; font-weight: 600; }
+      .dsev-empty-start-sub { font-size: 13px; color: var(--dsev-text-3); margin-top: 6px; line-height: 1.6; }
       .dsev-comment-replies {
         margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--dsev-border);
         display: flex; flex-direction: column; gap: 6px;
@@ -942,8 +958,8 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsev-range' }, fmt(0), h('span', null, '—'), fmt(record.span || 0)),
           h('div', { className: 'dsev-canvas-meta' },
             h('span', null, h('b', null, String(chapters.length)), ' 章'),
-            h('span', null, h('b', null, String(record.states || 0)), ' 个画面状态'),
-            h('span', null, h('b', null, String(record.units || 0)), ' 条语元'),
+            h('span', null, h('b', null, String(record.states || 0)), ' 个画面片段'),
+            h('span', null, h('b', null, String(record.units || 0)), ' 条台词'),
             h('span', null, record.mode || ''),
             h('span', null, 'v1.5'))))
       const canvasCard = h('div', { className: 'dsev-canvas-card' },
@@ -1378,7 +1394,7 @@ window.__ModuleLoader__.load({
           },
         }, '看帧'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: addAnnotation }, '标注'),
-        h('button', { type: 'button', className: 'dsev-btn', onClick: () => setShowAiTools((value) => !value) }, showAiTools ? '收起 AI 工具' : 'AI 工具'),
+        h('button', { type: 'button', className: 'dsev-btn', onClick: () => setShowAiTools((value) => !value) }, showAiTools ? '收起智能工具' : '智能工具'),
         ...(showAiTools ? [
           h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: describeKeyFrames }, '关键帧思考'),
@@ -1429,13 +1445,13 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-now-url', title: currentChapter && currentChapter.url ? currentChapter.url : '' },
           currentChapter && currentChapter.url ? currentChapter.url : '无地址栏'),
         h('div', { className: 'dsev-now-stats' },
-          h('span', null, '停留 ', h('b', null, currentChapter ? `${Math.round(currentChapter.dwell)}s` : '—')),
-          h('span', null, '注意力 ', h('b', null, currentChapter ? String(Math.round(currentChapter.attention)) : '—')),
+          h('span', null, '本段 ', h('b', null, currentChapter ? `${Math.round(currentChapter.dwell)}s` : '—')),
+          h('span', null, '关注度 ', h('b', null, currentChapter ? String(Math.round(currentChapter.attention)) : '—')),
           h('span', null, '画面 ', h('b', null, currentState ? String(currentState.attention ? Math.round(currentState.attention.dwell_s) + 's' : '进行中') : '—'))),
         h('div', { className: 'dsev-now-label' },
           currentState
             ? (currentState.label_hi || currentState.label || currentState.label_speech || '（该时刻无文字标签）')
-            : '（该时刻没有画面状态）'))
+            : '（这一时刻没有画面信息）'))
 
       const unitRows = windowUnits.map((u) => h('div', {
         key: 'u' + u.t0,
@@ -1463,18 +1479,17 @@ window.__ModuleLoader__.load({
         [
           ['时长', fmt(span)],
           ['章节', chapters.length],
-          ['画面状态', (data.event.states || []).length],
-          ['语元', (data.event.units || []).length],
-          ['审阅标记', reviewFlags.length],
+          ['台词', (data.event.units || []).length],
+          ['待确认', reviewFlags.length],
         ].map(([label, value]) => h('div', { className: 'dsev-sum-chip', key: label },
           h('span', { className: 'dsev-sum-chip-label' }, label),
           h('span', { className: 'dsev-sum-chip-value' }, String(value)))))
       const reviewTabs = [
         ['chapters', `章节 ${chapters.length}`],
-        ['transcript', `转写 ${windowUnits.length}`],
+        ['transcript', `台词 ${windowUnits.length}`],
         ['annotations', `标注 ${annotations.filter((item) => !item.resolved).length}/${annotations.length}`],
-        ['descriptions', `描述 ${(vision.descriptions || []).length}`],
-        ['flags', `标记 ${reviewFlags.length}`],
+        ['descriptions', `画面解读 ${(vision.descriptions || []).length}`],
+        ['flags', `待确认 ${reviewFlags.length}`],
       ]
       const openAnnotations = annotations.filter((item) => !item.resolved)
       const doneAnnotations = annotations.filter((item) => item.resolved)
@@ -1548,7 +1563,7 @@ window.__ModuleLoader__.load({
             : null,
         ]
       const descriptionsPanel = (vision.descriptions || []).length === 0
-        ? h('div', { className: 'dsev-detail-empty' }, '没有描述：展开 AI 工具后点「描述画面」')
+        ? h('div', { className: 'dsev-detail-empty' }, '还没有画面解读：展开「智能工具」后点「描述画面」')
         : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
           h('button', { type: 'button', className: 'dsev-time dsev-time-btn', onClick: () => seek(item.t0) }, fmt(item.t0)),
           h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))
@@ -1645,7 +1660,7 @@ window.__ModuleLoader__.load({
       const content = error
         ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-error' }, '无法加载记录：', error))
         : active === null
-          ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-empty' }, h('h3', null, '还没有审阅记录'), h('div', null, '先用 build_video_event 构建一个视频事件记录。')))
+          ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-empty' }, h('h3', null, '还没有视频'), h('div', null, '先到视频库添加一个视频。')))
           : h('div', { className: 'dsev-review-main' },
             h('div', { className: 'dsev-topbar' },
               h('span', { className: 'dsev-topbar-title' }, active.name),
@@ -1892,7 +1907,7 @@ window.__ModuleLoader__.load({
         type: 'checkbox',
         className: 'dsev-lib-select',
         checked: selected.includes(r.out),
-        title: '选中用于批量证据工单',
+        title: '选中用于批量检查',
         onClick: (e) => e.stopPropagation(),
         onChange: () => toggleSelect(r.out),
       }),
@@ -1901,13 +1916,13 @@ window.__ModuleLoader__.load({
         : h('div', { className: 'dsev-lib-thumb' }),
       compare.includes(r.out) ? h('span', { className: 'dsev-lib-check' }, '✓') : null,
       h('div', { className: 'dsev-lib-body' },
-        h('div', { className: 'dsev-lib-title', title: r.title || r.name || r.dir }, r.title || r.name || r.dir),
-        h('div', { className: 'dsev-lib-meta' }, `${r.chapters} 章 · ${fmt(r.duration || r.span || 0)} · ${r.mode || ''}`),
-        h('div', { className: 'dsev-lib-meta dsev-lib-source', title: r.source || '' },
-          (r.source || '').split(/[\\/]/).pop() || '无源文件'),
+        h('div', { className: 'dsev-lib-title', title: r.title || r.name || '未命名视频' }, r.title || r.name || '未命名视频'),
+        h('div', { className: 'dsev-lib-meta' }, `${fmt(r.duration || r.span || 0)} · ${r.chapters} 个章节`),
+        h('div', { className: 'dsev-lib-meta' },
+          h('span', { className: 'dsev-lib-status' + (r.gates ? ' dsev-lib-status-ok' : '') }, r.gates ? '已核对' : '需检查')),
         h('div', { className: 'dsev-tags' }, (r.tags || []).map((t) => h('span', { key: t, className: 'dsev-tag' }, t))),
         h('div', { className: 'dsev-lib-actions' },
-          h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: (e) => { e.stopPropagation(); onOpen(r.out) } }, '打开'),
+          h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: (e) => { e.stopPropagation(); onOpen(r.out) } }, '查看'),
           h('details', { className: 'dsev-lib-more', onClick: (e) => e.stopPropagation() },
             h('summary', { className: 'dsev-btn' }, '更多'),
             h('div', { className: 'dsev-lib-menu' },
@@ -1926,34 +1941,34 @@ window.__ModuleLoader__.load({
           tabIndex: 0,
           onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') setShowBuild((value) => !value) },
         },
-        h('div', { className: 'dsev-build-title' }, '构建新记录'),
-        h('span', { className: 'dsev-meta' }, showBuild ? '收起表单' : '展开表单'),
+        h('div', { className: 'dsev-build-title' }, '添加新视频'),
+        h('span', { className: 'dsev-meta' }, showBuild ? '收起' : '填写视频信息'),
         h('span', { className: 'dsev-grow' }),
         h('button', {
           type: 'button', className: 'dsev-btn',
           onClick: (e) => { e.stopPropagation(); setShowBuild((value) => !value) },
-        }, showBuild ? '收起' : '新建')),
+        }, showBuild ? '收起' : '添加')),
         showBuild
           ? h('div', null,
             h('div', { className: 'dsev-build-grid' },
-              h('label', { className: 'dsev-field' }, '视频路径',
+              h('label', { className: 'dsev-field' }, '视频文件（本机路径）',
                 h('input', { value: form.video, placeholder: 'D:\\...\\video.mp4', onChange: (e) => setForm({ ...form, video: e.target.value }) })),
-              h('label', { className: 'dsev-field' }, '转写文件（可选，[mm:ss] 格式）',
+              h('label', { className: 'dsev-field' }, '字幕/转写文件（可选）',
                 h('input', { value: form.transcript, placeholder: 'D:\\...\\transcript.txt', onChange: (e) => setForm({ ...form, transcript: e.target.value }) })),
-              h('label', { className: 'dsev-field' }, '模式',
+              h('label', { className: 'dsev-field' }, '内容类型',
                 h('select', { value: form.mode, onChange: (e) => setForm({ ...form, mode: e.target.value }) },
-                  ['auto', 'screen', 'action', 'talk'].map((m) => h('option', { key: m, value: m }, m)))),
-              h('label', { className: 'dsev-field' }, '时长（秒）',
+                  ['auto', 'screen', 'action', 'talk'].map((m) => h('option', { key: m, value: m }, ({ auto: '自动识别', screen: '屏幕操作', action: '动作演示', talk: '对话讲解' })[m] || m)))),
+              h('label', { className: 'dsev-field' }, '只分析前 N 秒（可选）',
                 h('input', { value: form.duration, placeholder: '全部', onChange: (e) => setForm({ ...form, duration: e.target.value }) })),
-              h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', disabled: busy, onClick: enqueue }, busy ? '提交中…' : '加入队列')),
+              h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', disabled: busy, onClick: enqueue }, busy ? '提交中…' : '开始分析')),
             h('div', { style: { display: 'flex', gap: 16, marginTop: 8, alignItems: 'center' } },
               h('label', { className: 'dsev-check' },
-                h('input', { type: 'checkbox', checked: form.asr, onChange: (e) => setForm({ ...form, asr: e.target.checked }) }), '本地 ASR（CPU）'),
+                h('input', { type: 'checkbox', checked: form.asr, onChange: (e) => setForm({ ...form, asr: e.target.checked }) }), '自动生成字幕（本地）'),
               h('label', { className: 'dsev-check' },
-                h('input', { type: 'checkbox', checked: form.hiLabels, onChange: (e) => setForm({ ...form, hiLabels: e.target.checked }) }), '高分辨率标签（含 URL）'),
+                h('input', { type: 'checkbox', checked: form.hiLabels, onChange: (e) => setForm({ ...form, hiLabels: e.target.checked }) }), '识别更多画面文字（含网址）'),
               h('span', { className: 'dsev-meta' }, note)))
           : null,
-        h('div', { className: 'dsev-meta', style: { marginTop: 6 } }, '提交后进入构建队列（最多 2 个并行）'))
+        h('div', { className: 'dsev-meta', style: { marginTop: 6 } }, '分析会排队进行，完成后会出现在上面的视频列表里。'))
 
       const runningJobs = jobs.filter((j) => j.status !== 'done')
       const jobsCard = jobs.length === 0 ? null : h('div', { className: 'dsev-jobs' },
@@ -1968,10 +1983,10 @@ window.__ModuleLoader__.load({
       const compareRows = [
         ['时长', (r) => fmt(r.duration || r.span || 0)],
         ['章节', (r) => String(r.chapters)],
-        ['画面状态', (r) => String(r.states)],
-        ['语元', (r) => String(r.units)],
+        ['画面片段', (r) => String(r.states)],
+        ['台词', (r) => String(r.units)],
         ['模式', (r) => r.mode || ''],
-        ['校验', (r) => (r.gates ? 'PASS' : 'FAIL')],
+        ['核对', (r) => (r.gates ? '已核对' : '需检查')],
       ]
       const headCells = picked.map((r) => h('th', { key: r.out }, r.title || r.name || r.dir))
       const bodyRows = compareRows.map(([label, read]) => h('tr', { key: label },
@@ -2023,42 +2038,45 @@ window.__ModuleLoader__.load({
             }))))
         : null
       const batchCard = h('div', { className: 'dsev-card-box dsev-batch' + (batch.running ? ' dsev-batch-running' : '') },
-        h('div', { className: 'dsev-card-title' }, `批量证据工单（已选 ${selected.length}）`),
+        h('div', { className: 'dsev-card-title' }, `批量检查（已选 ${selected.length} 个视频）`),
         h('div', { className: 'dsev-batch-row' },
           h('input', {
             className: 'dsev-input', style: { flex: 1, minWidth: 200 },
-            placeholder: '要定位的元素，逗号分隔',
+            placeholder: '要检查什么？例如：价格、购买按钮',
             value: batchPolicy.instructions,
             onChange: (e) => setBatchPolicy((prev) => ({ ...prev, instructions: e.target.value })),
           }),
           h('select', {
             className: 'dsev-select', value: batchPolicy.order,
             onChange: (e) => setBatchPolicy((prev) => ({ ...prev, order: e.target.value })),
-          }, h('option', { value: 'fifo' }, 'FIFO 顺序'), h('option', { value: 'priority' }, '优先级')),
-          h('label', { className: 'dsev-check' }, '重试',
-            h('input', {
-              type: 'number', min: 0, max: 3, className: 'dsev-input', style: { width: 54 },
-              value: batchPolicy.retry,
-              onChange: (e) => setBatchPolicy((prev) => ({ ...prev, retry: e.target.value })),
-            })),
-          h('label', { className: 'dsev-check' }, '并发',
-            h('input', {
-              type: 'number', min: 1, max: 2, className: 'dsev-input', style: { width: 54 },
-              value: batchPolicy.concurrency,
-              onChange: (e) => setBatchPolicy((prev) => ({ ...prev, concurrency: e.target.value })),
-            })),
-          h('label', { className: 'dsev-check', title: '超过该秒数后不再开始新记录，剩余标记为跳过；0 表示不限制' }, '截止(秒)',
-            h('input', {
-              type: 'number', min: 0, className: 'dsev-input', style: { width: 72 },
-              value: batchPolicy.deadlineSeconds,
-              onChange: (e) => setBatchPolicy((prev) => ({ ...prev, deadlineSeconds: e.target.value })),
-            })),
+          }, h('option', { value: 'fifo' }, '按顺序'), h('option', { value: 'priority' }, '按优先级')),
+          h('details', { className: 'dsev-advanced' },
+            h('summary', null, '高级选项'),
+            h('div', { className: 'dsev-advanced-row' },
+              h('label', { className: 'dsev-check' }, '失败重试',
+                h('input', {
+                  type: 'number', min: 0, max: 3, className: 'dsev-input', style: { width: 54 },
+                  value: batchPolicy.retry,
+                  onChange: (e) => setBatchPolicy((prev) => ({ ...prev, retry: e.target.value })),
+                })),
+              h('label', { className: 'dsev-check' }, '同时处理',
+                h('input', {
+                  type: 'number', min: 1, max: 2, className: 'dsev-input', style: { width: 54 },
+                  value: batchPolicy.concurrency,
+                  onChange: (e) => setBatchPolicy((prev) => ({ ...prev, concurrency: e.target.value })),
+                })),
+              h('label', { className: 'dsev-check', title: '超过该秒数后不再开始新视频，剩余标记为跳过；0 表示不限制' }, '时间上限(秒)',
+                h('input', {
+                  type: 'number', min: 0, className: 'dsev-input', style: { width: 72 },
+                  value: batchPolicy.deadlineSeconds,
+                  onChange: (e) => setBatchPolicy((prev) => ({ ...prev, deadlineSeconds: e.target.value })),
+                })))),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => setSelected(records.map((r) => r.out)) }, '全选'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => setSelected([]) }, '清空'),
           h('button', {
             type: 'button', className: 'dsev-btn dsev-btn-primary',
             disabled: batch.running || selected.length === 0, onClick: startBatch,
-          }, batch.running ? '批量运行中…' : '开始批量')),
+          }, batch.running ? '检查中…' : '开始检查')),
         priorityFields,
         batch.running || batchProgress
           ? h('div', { className: 'dsev-progress' },
@@ -2072,14 +2090,22 @@ window.__ModuleLoader__.load({
         batch.note && !batch.running ? h('div', { className: 'dsev-meta', style: { marginTop: 8 } }, batch.note) : null)
 
       return h('div', { className: 'dsev-library' },
+        h('div', { className: 'dsev-lib-hero' },
+          h('div', { className: 'dsev-lib-hero-title' }, '我的视频'),
+          h('div', { className: 'dsev-lib-hero-sub' }, '选一个视频查看画面、台词和需要确认的地方；也可以批量检查多个视频。')),
         h('div', { className: 'dsev-lib-toolbar' },
           h('input', {
-            className: 'dsev-input', placeholder: '搜索标题 / 源文件 / 标签', value: query,
+            className: 'dsev-input', placeholder: '搜索视频标题或标签', value: query,
             onChange: (e) => setQuery(e.target.value),
           }),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => { loadJobs(); onRefresh() } }, '刷新'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => { loadTrash(); setShowTrash(!showTrash) } }, '回收站'),
-          h('span', { className: 'dsev-meta' }, `${filtered.length} / ${records.length} 条`)),
+          h('span', { className: 'dsev-meta' }, `${filtered.length} / ${records.length} 个`)),
+        records.length === 0
+          ? h('div', { className: 'dsev-empty-start' },
+            h('div', { className: 'dsev-empty-start-title' }, '还没有视频'),
+            h('div', { className: 'dsev-empty-start-sub' }, '点下面的「添加新视频」，选择一个本机视频文件；分析完成后会出现在这里。'))
+          : null,
         batchCard,
         buildCard,
         jobsCard,
@@ -2255,7 +2281,7 @@ window.__ModuleLoader__.load({
       }
       const cards = [
         ['记录', totals.records], ['总时长', fmtClock(totals.duration)], ['章节', totals.chapters],
-        ['状态', totals.states], ['语元', totals.units],
+        ['画面片段', totals.states], ['台词', totals.units],
       ].map(([label, value]) => h('div', { className: 'dsev-sum-card', key: label },
         h('div', { className: 'dsev-sum-label' }, label),
         h('div', { className: 'dsev-sum-value' }, String(value))))
@@ -2280,7 +2306,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportOne(record.out) }, '导出')))))
       const table = h('table', { className: 'dsev-table' },
         h('thead', null, h('tr', null,
-          h('th', null, '记录'), h('th', null, '时长'), h('th', null, '章节'), h('th', null, '状态'), h('th', null, '校验'), h('th', null, '审阅'), h('th', null, ''))),
+          h('th', null, '记录'), h('th', null, '时长'), h('th', null, '章节'), h('th', null, '核对'), h('th', null, '审阅'), h('th', null, ''))),
         h('tbody', null, rows))
       return h('div', { className: 'dsev-page' },
         h('div', { className: 'dsev-topbar' },
@@ -2335,7 +2361,7 @@ window.__ModuleLoader__.load({
             table)),
           h('div', { className: 'dsev-rail' },
             h('div', { className: 'dsev-card-box' },
-              h('div', { className: 'dsev-card-title' }, '审阅标记分布'),
+              h('div', { className: 'dsev-card-title' }, '需要确认的问题'),
               flags.length === 0 ? h('div', { className: 'dsev-detail-empty' }, '没有标记') : flags),
             h('div', { className: 'dsev-card-box' },
               h('div', { className: 'dsev-card-title' }, '跨记录注意力最高'),
@@ -2421,7 +2447,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'dsev-rec-meta' }, r.source || (r.video ? '有视频' : '无视频')))))
       const sideHead = h('div', { className: 'dsev-side-head' }, '视频库', h('span', { className: 'dsev-count' }, String(records.length)))
       const tabs = h('div', { className: 'dsev-tabs' },
-        [['library', '库'], ['review', '审阅']].map(([key, label]) => h('button', {
+        [['library', '视频库'], ['review', '查看']].map(([key, label]) => h('button', {
           key, type: 'button',
           className: 'dsev-tab' + (view === key ? ' dsev-tab-on' : ''),
           onClick: () => setView(key),
@@ -2444,13 +2470,13 @@ window.__ModuleLoader__.load({
             onChange: (e) => setActiveOut(e.target.value),
             title: '切换记录',
           }, records.map((r) => h('option', { key: r.out, value: r.out }, r.title || r.name || r.dir)))
-          : h('span', { className: 'dsev-topbar-title' }, '视频审阅'),
+          : h('span', { className: 'dsev-topbar-title' }, '我的视频'),
         tabs,
         active ? h('span', { className: 'dsev-badge' },
           h('i', { className: 'dsev-badge-dot' + (active.gates ? '' : ' dsev-badge-dot-bad') }),
           active.gates ? 'PASS' : 'FAIL') : null,
         (data && data.event && data.event.review && data.event.review.flags && data.event.review.flags.length > 0)
-          ? h('span', { className: 'dsev-badge' }, `审阅 ${data.event.review.flags.length}`)
+          ? h('span', { className: 'dsev-badge' }, `待确认 ${data.event.review.flags.length}`)
           : null,
         h('div', { className: 'dsev-topbar-actions' },
           view === 'review' ? h('button', { type: 'button', className: 'dsev-btn', onClick: () => setView('library') }, '← 库') : null,
@@ -2474,12 +2500,12 @@ window.__ModuleLoader__.load({
           }))
           : active === null
             ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-empty' },
-              h('h3', null, records.length > 0 ? '从库中选择一条记录' : '视频库是空的'),
+              h('h3', null, records.length > 0 ? '从视频库选择一个视频' : '视频库还是空的'),
               h('div', null, records.length > 0
-                ? '点击「库」中的记录卡片进入审阅。'
-                : '先用 build_video_event 构建一个视频事件记录，完成后这里会出现缩略图。'),
+                ? '点击视频卡片即可查看画面、台词和需要确认的地方。'
+                : '先到「视频库」添加一个视频，分析完成后这里就会出现它。'),
               records.length > 0
-                ? h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: () => setView('library') }, '去库页')
+                ? h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: () => setView('library') }, '去视频库')
                 : null))
             : dataError
               ? h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-error' }, '无法加载事件数据：', dataError))
