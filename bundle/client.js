@@ -207,9 +207,11 @@ window.__ModuleLoader__.load({
         content: ''; position: absolute; inset: 0 0 auto 0; height: 300px; pointer-events: none;
         background: radial-gradient(90% 160% at 50% 0%, rgba(124,140,255,0.14) 0%, transparent 65%);
       }
-      .dsev-page { position: relative; max-width: 1080px; margin: 0 auto; padding: 26px 28px 48px; animation: dsev-fade 0.25s ease; }
+      .dsev-page { position: relative; max-width: 1240px; margin: 0 auto; padding: 26px 28px 48px; animation: dsev-fade 0.25s ease; }
 
-      .dsev-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+      .dsev-noside .dsev-topbar-wrap { padding: 16px 28px 0; position: relative; z-index: 1; }
+      .dsev-noside .dsev-main { width: 100%; }
+      .dsev-topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 8px; margin-bottom: 18px; }
       .dsev-topbar-title { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--dsev-text-2); }
       .dsev-topbar-actions { display: flex; gap: 8px; margin-left: auto; }
 
@@ -876,6 +878,7 @@ window.__ModuleLoader__.load({
       }, [data])
       const [pipelineInstruction, setPipelineInstruction] = useState('')
       const [pipelineState, setPipelineState] = useState({ running: false, message: '' })
+      const [showAiTools, setShowAiTools] = useState(false)
       const runEvidencePipeline = () => {
         const instructions = pipelineInstruction
           .split(/[,，;；]/)
@@ -1126,21 +1129,24 @@ window.__ModuleLoader__.load({
         h('button', { type: 'button', className: 'dsev-btn', onClick: addAnnotation }, '标注'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('tickets') }, '工单'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: () => exportWork('sop') }, 'SOP'),
-        h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
-        h('button', { type: 'button', className: 'dsev-btn', onClick: describeKeyFrames }, '关键帧思考'),
-        h('input', {
-          className: 'dsev-input',
-          style: { maxWidth: 210 },
-          placeholder: '要定位的元素，如 商品价格',
-          value: pipelineInstruction,
-          onInput: (e) => setPipelineInstruction(e.target.value),
-        }),
-        h('button', {
-          type: 'button', className: 'dsev-btn', disabled: pipelineState.running, onClick: runEvidencePipeline,
-        }, '证据工单'),
-        pipelineState.message
-          ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, pipelineState.message)
-          : null,
+        h('button', { type: 'button', className: 'dsev-btn', onClick: () => setShowAiTools((value) => !value) }, showAiTools ? '收起 AI 工具' : 'AI 工具'),
+        ...(showAiTools ? [
+          h('button', { type: 'button', className: 'dsev-btn', onClick: describeFrames }, '描述画面'),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: describeKeyFrames }, '关键帧思考'),
+          h('input', {
+            className: 'dsev-input',
+            style: { maxWidth: 210 },
+            placeholder: '要定位的元素，如 商品价格',
+            value: pipelineInstruction,
+            onInput: (e) => setPipelineInstruction(e.target.value),
+          }),
+          h('button', {
+            type: 'button', className: 'dsev-btn', disabled: pipelineState.running, onClick: runEvidencePipeline,
+          }, '证据工单'),
+          pipelineState.message
+            ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, pipelineState.message)
+            : null,
+        ] : []),
         h('button', { type: 'button', className: 'dsev-btn', onClick: prevChapter }, '上一章'),
         h('button', { type: 'button', className: 'dsev-btn', onClick: nextChapter }, '下一章'),
         h('select', {
@@ -1889,6 +1895,14 @@ window.__ModuleLoader__.load({
         }, label)))
       const header = h('div', { className: 'dsev-topbar' },
         h('span', { className: 'dsev-topbar-title' }, active ? (active.title || active.name || active.dir) : '视频审阅'),
+        records.length > 0
+          ? h('select', {
+            className: 'dsev-select',
+            value: activeOut || '',
+            onChange: (e) => setActiveOut(e.target.value),
+            title: '切换记录',
+          }, records.map((r) => h('option', { key: r.out, value: r.out }, r.title || r.name || r.dir)))
+          : null,
         tabs,
         active ? h('span', { className: 'dsev-badge' },
           h('i', { className: 'dsev-badge-dot' + (active.gates ? '' : ' dsev-badge-dot-bad') }),
@@ -1926,10 +1940,9 @@ window.__ModuleLoader__.load({
                   ? h(ReviewPlayer, { record: active, data })
                   : h('div', { className: 'dsev-page' }, h(OverviewBody, { record: active, event: data.event })))
                 : h('div', { className: 'dsev-page' }, h('div', { className: 'dsev-video-note' }, '加载中…'))
-      return h('div', { className: 'dsev dsev-review' },
-        h('div', { className: 'dsev-side' }, sideHead, h('div', { className: 'dsev-review-records' }, items)),
-        h('div', { style: { flex: 1, minWidth: 0, overflowY: 'auto' } },
-          h('div', { style: { padding: '16px 24px 0' } }, header),
+      return h('div', { className: 'dsev dsev-review dsev-noside' },
+        h('div', { className: 'dsev-main' },
+          h('div', { className: 'dsev-topbar-wrap' }, header),
           content))
     }
 

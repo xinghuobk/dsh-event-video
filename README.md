@@ -168,7 +168,7 @@ Use DSH's plugin manager with `install_bundle` and the `bundle/` directory as ta
 - Pipeline tool: `run_vision_pipeline(out, instructions, samples?, times?, describe?, think?)` runs descriptions / key-frame thinking / fused tickets in one call at key timestamps (top attention + chapter starts by default) and writes `pipeline.json`. The player has an **证据工单** input + button that calls it and polls `pipeline-progress.json` to show stage/index progress.
 - Frame check: `read_video_frame(out, t)` returns the frame at a timestamp plus scene label, chapter and nearby speech; the model then calls `read_image` on the path to actually see it (also wired to the **看帧** button in the player).
 - Export: `export_video_analysis(out)` writes `analysis.md`, `chapters.csv`, `analysis.docx`, `analysis.xlsx` and raw `event.json` under the data home's `exports/`; `summarize_video_analyses()` returns a one-shot overview of every record (totals, review-flag counts, cross-record attention leaders).
-- UI: sidebar **Video Review** → Review (player + synced transcript), Overview (Gantt + chapters), Library (thumbnails, search, tags, compare, queue, trash), Summary (all analyses at a glance + export all), Camera.
+- UI: sidebar **Video Review** opens one full-width workspace: record switcher in the top bar, Review (player + synced transcript) as the main area, secondary views (Overview, Library, Summary, Camera) behind tabs; AI actions are collapsed under **AI 工具**.
 
 ## Camera (Windows, opt-in)
 
