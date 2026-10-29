@@ -36,6 +36,10 @@ let TTS_MODEL = 'tts-1'
 let TTS_VOICE = 'alloy'
 let TTS_API_KEY = ''
 let TTS_ARGS = []
+let OCR_ENABLED = true
+let OCR_COMMAND = ''
+let OCR_SCRIPT = ''
+let OCR_ARGS = []
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -74,6 +78,12 @@ function configure(config = {}) {
   TTS_ARGS = Array.isArray(config.ttsArgs)
     ? config.ttsArgs.map(String)
     : String(process.env.DSH_EVENT_VIDEO_TTS_ARGS || '').split('|').filter(Boolean)
+  OCR_ENABLED = config.enableOcr !== false && process.env.DSH_EVENT_VIDEO_OCR !== '0'
+  OCR_COMMAND = config.ocrCommand || process.env.DSH_EVENT_VIDEO_OCR_COMMAND || ''
+  OCR_SCRIPT = config.ocrScript || process.env.DSH_EVENT_VIDEO_OCR_SCRIPT || ''
+  OCR_ARGS = Array.isArray(config.ocrArgs)
+    ? config.ocrArgs.map(String)
+    : String(process.env.DSH_EVENT_VIDEO_OCR_ARGS || '').split('|').filter(Boolean)
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -1680,6 +1690,57 @@ async function frameFor(out, t) {
   }
 }
 
+async function ocrFrame(out, t) {
+  if (!OCR_ENABLED) throw new Error('OCR is disabled')
+  if (!OCR_COMMAND) throw new Error('OCR is not configured: set ocrCommand / DSH_EVENT_VIDEO_OCR_COMMAND')
+  const info = await frameFor(out, t)
+  const cacheDir = join(out, 'ocr-cache')
+  const cachePath = join(cacheDir, `${info.frame.split(/[\\/]/).pop()}.json`)
+  try {
+    const cached = JSON.parse(await fs.readFile(cachePath, 'utf8'))
+    if (cached && cached.engine) return { ...cached, out, t: info.t, frame: info.frame, cached: true }
+  } catch {
+    /* first run */
+  }
+  const started = Date.now()
+  const result = await new Promise((resolveOcr) => {
+    const args = [...OCR_ARGS]
+    if (OCR_SCRIPT) args.push(OCR_SCRIPT)
+    args.push('--image', info.frame)
+    const child = spawn(OCR_COMMAND, args, { windowsHide: true })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    const timer = setTimeout(() => { try { child.kill() } catch { /* already gone */ } }, 300000)
+    child.on('error', (error) => { clearTimeout(timer); resolveOcr({ code: -1, stdout, stderr: String(error) }) })
+    child.on('close', (code) => { clearTimeout(timer); resolveOcr({ code, stdout, stderr }) })
+  })
+  if (result.code !== 0) throw new Error(`OCR command exited ${result.code}: ${result.stderr.slice(-300)}`)
+  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  let payload = {}
+  for (let index = lines.length - 1; index >= 0 && index >= lines.length - 5; index -= 1) {
+    try {
+      payload = JSON.parse(lines[index])
+      break
+    } catch {
+      /* OCR tools may log before the JSON line */
+    }
+  }
+  if (!payload || typeof payload !== 'object') throw new Error('OCR command did not return JSON')
+  await fs.mkdir(cacheDir, { recursive: true }).catch(() => {})
+  await fs.writeFile(cachePath, JSON.stringify(payload, null, 1)).catch(() => {})
+  return {
+    out,
+    t: info.t,
+    frame: info.frame,
+    engine: payload.engine || 'unknown',
+    text: payload.text || '',
+    lines: Array.isArray(payload.lines) ? payload.lines : [],
+    seconds: Math.round((Date.now() - started) / 100) / 10,
+  }
+}
+
 function serveFrameImage(res, path) {
   fs.stat(path).then((stat) => {
     res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': stat.size, 'cache-control': 'no-store' })
@@ -1862,6 +1923,28 @@ async function askVideoLibrary(question, limit = 6) {
       score: hit.score,
     })),
   }
+}
+
+const ocrFrameTool = {
+  name: 'ocr_video_frame',
+  description: 'Read exact on-screen text at a timestamp with the configured OCR command (PaddleOCR-VL or PaddleOCR). Returns engine, text lines and the frame anchor. Use this for verbatim text/URLs; VLM descriptions are not exact.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 't'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      t: { type: 'number', description: 'Seconds from the start of the recording.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 320000,
+  async execute(args) {
+    return ocrFrame(args.out, args.t)
+  },
 }
 
 const describeFramesTool = {
@@ -2096,6 +2179,15 @@ function handler(req, res) {
         } else {
           sendJson(res, 200, info)
         }
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/ocr' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await ocrFrame(body.out, body.t))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -2732,6 +2824,9 @@ export function apply(ctx, config) {
   if ((config || {}).enableFrameTool !== false && process.env.DSH_EVENT_VIDEO_FRAME_TOOL !== '0') {
     ctx.effect(() => ctx.tools.register(readVideoFrameTool), 'event-video: frame tool')
   }
+  if (OCR_ENABLED) {
+    ctx.effect(() => ctx.tools.register(ocrFrameTool), 'event-video: ocr tool')
+  }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
   if (ANNOTATIONS_ENABLED) {
@@ -2783,6 +2878,8 @@ export const __test = {
   normalizeWorkItems,
   planVisionFrames,
   planKeyVisionFrames,
+  ocrFrame,
+  ocrFrameTool,
   describeRecord,
   callVlmDescription,
   readVision,

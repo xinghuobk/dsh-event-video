@@ -63,3 +63,23 @@ The panel works for review, search, annotations, tickets and export; camera sign
 - GitHub refuses multi-GB binaries and model licenses differ;
 - the VLM choice is a user decision (size vs quality);
 - `scripts/install.ps1` is the packaging boundary: it installs Ollama if missing, pulls the chosen model and downloads the MediaPipe tasks, without storing weights in git.
+
+## Optional: PaddleOCR-VL (highest text accuracy)
+
+PaddleOCR-VL reads screen text and URLs much more reliably than any of the general VLMs above, but needs its own Python 3.12 environment:
+
+```bash
+uv venv --python 3.12 D:\agent\ocr-venv
+uv pip install --python D:\agent\ocr-venv\Scripts\python.exe paddlepaddle paddleocr "paddlex[ocr]"
+```
+
+Then point the bundle at the adapter (one-time model download goes to `~/.paddlex`):
+
+```yaml
+- id: event-video-card
+  config:
+    ocrCommand: D:\agent\ocr-venv\Scripts\python.exe
+    ocrScript: D:\agent\dsh-event-video\scripts\paddleocr_vl.py
+```
+
+The tool `ocr_video_frame(out, t)` returns `{engine, text, lines, frame}` and caches results in `<record>/ocr-cache/`. On CPU the first call takes minutes (model load + layout + VLM); cached frames are instant. Use it for key frames and exact URLs, not for every frame.
