@@ -40,6 +40,12 @@ let OCR_ENABLED = true
 let OCR_COMMAND = ''
 let OCR_SCRIPT = ''
 let OCR_ARGS = []
+let GROUND_ENABLED = true
+let GROUND_COMMAND = ''
+let GROUND_SCRIPT = ''
+let GROUND_ARGS = []
+let GROUND_ENDPOINT = 'http://127.0.0.1:8081/v1/chat/completions'
+let GROUND_ALIAS = 'ui-tars'
 
 function defaultHome() {
   if (process.env.DSH_EVENT_VIDEO_HOME) return resolve(process.env.DSH_EVENT_VIDEO_HOME)
@@ -84,6 +90,14 @@ function configure(config = {}) {
   OCR_ARGS = Array.isArray(config.ocrArgs)
     ? config.ocrArgs.map(String)
     : String(process.env.DSH_EVENT_VIDEO_OCR_ARGS || '').split('|').filter(Boolean)
+  GROUND_ENABLED = config.enableGround !== false && process.env.DSH_EVENT_VIDEO_GROUND !== '0'
+  GROUND_COMMAND = config.groundCommand || process.env.DSH_EVENT_VIDEO_GROUND_COMMAND || ''
+  GROUND_SCRIPT = config.groundScript || process.env.DSH_EVENT_VIDEO_GROUND_SCRIPT || ''
+  GROUND_ARGS = Array.isArray(config.groundArgs)
+    ? config.groundArgs.map(String)
+    : String(process.env.DSH_EVENT_VIDEO_GROUND_ARGS || '').split('|').filter(Boolean)
+  GROUND_ENDPOINT = config.groundEndpoint || process.env.DSH_EVENT_VIDEO_GROUND_ENDPOINT || 'http://127.0.0.1:8081/v1/chat/completions'
+  GROUND_ALIAS = config.groundAlias || process.env.DSH_EVENT_VIDEO_GROUND_ALIAS || 'ui-tars'
   const extra = splitRoots(config.extraRoots || process.env.DSH_EVENT_VIDEO_ROOTS)
   ROOTS = [...new Set([
     HOME, RECORDS_DIR, CACHE_DIR, CAMERA_DIR,
@@ -1741,6 +1755,63 @@ async function ocrFrame(out, t) {
   }
 }
 
+async function groundUiElement(out, t, instruction) {
+  if (!GROUND_ENABLED) throw new Error('grounding is disabled')
+  if (!GROUND_COMMAND) throw new Error('grounding is not configured: set groundCommand / DSH_EVENT_VIDEO_GROUND_COMMAND')
+  if (!instruction) throw new Error('instruction is required')
+  const info = await frameFor(out, t)
+  const cacheDir = join(out, 'ground-cache')
+  const safe = Buffer.from(instruction, 'utf8').toString('base64url').slice(0, 24)
+  const frameBase = info.frame.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')
+  const cachePath = join(cacheDir, `${frameBase}-${safe}.json`)
+  try {
+    const cached = JSON.parse(await fs.readFile(cachePath, 'utf8'))
+    if (cached && cached.engine) return { ...cached, out, t: info.t, frame: info.frame, cached: true }
+  } catch {
+    /* first run */
+  }
+  const started = Date.now()
+  const result = await new Promise((resolveGround) => {
+    const args = [...GROUND_ARGS]
+    if (GROUND_SCRIPT) args.push(GROUND_SCRIPT)
+    args.push('--image', info.frame, '--instruction', instruction, '--endpoint', GROUND_ENDPOINT, '--alias', GROUND_ALIAS)
+    const child = spawn(GROUND_COMMAND, args, { windowsHide: true })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+    const timer = setTimeout(() => { try { child.kill() } catch { /* already gone */ } }, 300000)
+    child.on('error', (error) => { clearTimeout(timer); resolveGround({ code: -1, stdout, stderr: String(error) }) })
+    child.on('close', (code) => { clearTimeout(timer); resolveGround({ code, stdout, stderr }) })
+  })
+  if (result.code !== 0) throw new Error(`grounding command exited ${result.code}: ${result.stderr.slice(-300)}`)
+  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  let payload = {}
+  for (let index = lines.length - 1; index >= 0 && index >= lines.length - 5; index -= 1) {
+    try {
+      payload = JSON.parse(lines[index])
+      break
+    } catch {
+      /* adapter may log before the JSON line */
+    }
+  }
+  if (!payload || typeof payload !== 'object') throw new Error('grounding command did not return JSON')
+  await fs.mkdir(cacheDir, { recursive: true }).catch(() => {})
+  await fs.writeFile(cachePath, JSON.stringify(payload, null, 1)).catch(() => {})
+  return {
+    out,
+    t: info.t,
+    frame: info.frame,
+    engine: payload.engine || 'unknown',
+    instruction,
+    point: payload.point || null,
+    box: payload.box || null,
+    normalized: payload.normalized || null,
+    raw: payload.raw || '',
+    seconds: Math.round((Date.now() - started) / 100) / 10,
+  }
+}
+
 function serveFrameImage(res, path) {
   fs.stat(path).then((stat) => {
     res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': stat.size, 'cache-control': 'no-store' })
@@ -1944,6 +2015,29 @@ const ocrFrameTool = {
   timeoutMs: 320000,
   async execute(args) {
     return ocrFrame(args.out, args.t)
+  },
+}
+
+const groundUiTool = {
+  name: 'ground_ui_element',
+  description: 'Locate a UI element in a frame with the configured GUI grounding model (UI-TARS). Returns the element point/box in pixels, the model raw answer and the frame anchor. Requires a llama.cpp/OpenAI-compatible grounding endpoint (groundCommand/groundEndpoint).',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['out', 't', 'instruction'],
+    properties: {
+      out: { type: 'string', description: 'Event record output directory.' },
+      t: { type: 'number', description: 'Seconds from the start of the recording.' },
+      instruction: { type: 'string', description: 'Target element description, e.g. 商品价格 or 登录按钮.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 320000,
+  async execute(args) {
+    return groundUiElement(args.out, args.t, args.instruction)
   },
 }
 
@@ -2188,6 +2282,15 @@ function handler(req, res) {
       const body = await readBody(req)
       try {
         sendJson(res, 200, await ocrFrame(body.out, body.t))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/ground' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await groundUiElement(body.out, body.t, body.instruction))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
       }
@@ -2827,6 +2930,9 @@ export function apply(ctx, config) {
   if (OCR_ENABLED) {
     ctx.effect(() => ctx.tools.register(ocrFrameTool), 'event-video: ocr tool')
   }
+  if (GROUND_ENABLED) {
+    ctx.effect(() => ctx.tools.register(groundUiTool), 'event-video: ground tool')
+  }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
   if (ANNOTATIONS_ENABLED) {
@@ -2880,6 +2986,8 @@ export const __test = {
   planKeyVisionFrames,
   ocrFrame,
   ocrFrameTool,
+  groundUiElement,
+  groundUiTool,
   describeRecord,
   callVlmDescription,
   readVision,

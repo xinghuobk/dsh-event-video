@@ -83,3 +83,29 @@ Then point the bundle at the adapter (one-time model download goes to `~/.paddle
 ```
 
 The tool `ocr_video_frame(out, t)` returns `{engine, text, lines, frame}` and caches results in `<record>/ocr-cache/`. On CPU the first call takes minutes (model load + layout + VLM); cached frames are instant. Use it for key frames and exact URLs, not for every frame.
+## Optional: UI-TARS-7B (GUI element grounding)
+
+UI-TARS locates a UI element from a natural-language description and returns its pixel coordinate. It runs as a llama.cpp server (OpenAI-compatible), so the plugin does not load it in-process.
+
+```powershell
+winget install -e --id ggml.llamacpp
+# GGUF + vision projector (~4.4 GB + 1.3 GB), via the HF mirror if huggingface.co is unreachable
+curl.exe -L -o D:\agent\models\ui-tars\UI-TARS-7B-SFT.Q4_K_M.gguf `
+  https://hf-mirror.com/mradermacher/UI-TARS-7B-SFT-GGUF/resolve/main/UI-TARS-7B-SFT.Q4_K_M.gguf
+curl.exe -L -o D:\agent\models\ui-tars\UI-TARS-7B-SFT.mmproj-fp16.gguf `
+  https://hf-mirror.com/mradermacher/UI-TARS-7B-SFT-GGUF/resolve/main/UI-TARS-7B-SFT.mmproj-fp16.gguf
+powershell -ExecutionPolicy Bypass -File scripts/start_uitars.ps1
+```
+
+Config:
+
+```yaml
+- id: event-video-card
+  config:
+    groundCommand: D:\agent\ocr-venv\Scripts\python.exe
+    groundScript: D:\agent\dsh-event-video\scripts\uitars_ground.py
+    groundEndpoint: http://127.0.0.1:8081/v1/chat/completions
+    groundAlias: ui-tars
+```
+
+`ground_ui_element(out, t, instruction)` returns `{point:[x,y], box, raw, frame}` and caches per frame+instruction in `<record>/ground-cache/`. First call is ~25-30 s on a laptop GPU; repeated identical calls are near-instant. UI-TARS outputs coordinates normalized to 0-1000; the adapter converts them to pixels.

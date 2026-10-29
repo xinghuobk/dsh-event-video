@@ -11,7 +11,7 @@ The plugin does not rely on a single "vision model". Visual understanding is spl
 | L2 geometry | hands/face/pose landmarks | MediaPipe tasks (hand/face/pose), rule-based gestures | temporal action classifier |
 | L3 batch describe | 1–2 sentence factual description for many frames | local VLM (`vlmModel`, default `gemma3:12b`; `minicpm-v:8b` for speed) | InternVL3.5, MiniCPM-V 4.5 |
 | L4 key-frame thinking | conclusion-level reading of a few important frames | reasoning VLM (`vlmThinkModel`, default `qwen3-vl:8b`) with 4096-token budget | Qwen3-VL-30B-A3B, Gemma3-27B (hardware permitting) |
-| L5 GUI grounding | "which element is this / where to click" | not implemented | **UI-TARS-7B**, OS-Atlas, OpenCUA |
+| L5 GUI grounding | "which element is this / where to click" | **UI-TARS-7B** via llama.cpp (`ground_ui_element`) | UI-TARS-1.5-7B, OS-Atlas, OpenCUA |
 | L6 fusion | merge OCR + VLM + geometry into anchored facts | `event.json`, `vision.json`, `annotations.json`, review flags | temporal fusion, cross-frame consistency |
 
 ## Routing
