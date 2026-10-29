@@ -595,6 +595,29 @@ window.__ModuleLoader__.load({
       .dsev-now-url { font-size: 13px; }
       .dsev-now-label { font-size: 13.5px; }
       .dsev-flag-row { font-size: 12.5px; }
+      /* --- library density --- */
+      .dsev-lib-title { font-size: 15px; }
+      .dsev-lib-meta { font-size: 12.5px; }
+      .dsev-lib-source { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+      .dsev-lib-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+      .dsev-lib-more { margin-left: auto; position: relative; }
+      .dsev-lib-more summary { list-style: none; cursor: pointer; }
+      .dsev-lib-more summary::-webkit-details-marker { display: none; }
+      .dsev-lib-menu {
+        position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 124px;
+        padding: 6px; border: 0.5px solid var(--dsev-border); border-radius: 10px;
+        background: var(--dsev-surface); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.4);
+        display: flex; flex-direction: column; gap: 2px;
+      }
+      .dsev-menu-item {
+        text-align: left; border: 0; background: transparent; color: var(--dsev-text-2);
+        font-size: 13px; padding: 7px 10px; border-radius: 7px; cursor: pointer;
+      }
+      .dsev-menu-item:hover { background: rgba(124, 140, 255, 0.12); color: var(--dsev-text-1); }
+      .dsev-menu-danger { color: var(--dsw-alias-state-error-primary); }
+      .dsev-build-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+      .dsev-build-head .dsev-grow { flex: 1; }
+      .dsev-build-head .dsev-build-title { margin: 0; font-size: 14px; }
       @media (prefers-reduced-motion: reduce) {
         .dsev, .dsev * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
       }
@@ -1531,6 +1554,7 @@ window.__ModuleLoader__.load({
       const [trash, setTrash] = useState([])
       const [showTrash, setShowTrash] = useState(false)
       const [selected, setSelected] = useState([])
+      const [showBuild, setShowBuild] = useState(false)
       const [batchPolicy, setBatchPolicy] = useState({
         instructions: '商品价格',
         order: 'fifo',
@@ -1710,38 +1734,59 @@ window.__ModuleLoader__.load({
         : h('div', { className: 'dsev-lib-thumb' }),
       compare.includes(r.out) ? h('span', { className: 'dsev-lib-check' }, '✓') : null,
       h('div', { className: 'dsev-lib-body' },
-        h('div', { className: 'dsev-lib-title' }, r.title || r.name || r.dir),
+        h('div', { className: 'dsev-lib-title', title: r.title || r.name || r.dir }, r.title || r.name || r.dir),
         h('div', { className: 'dsev-lib-meta' }, `${r.chapters} 章 · ${fmt(r.duration || r.span || 0)} · ${r.mode || ''}`),
-        h('div', { className: 'dsev-lib-meta' }, r.source || ''),
+        h('div', { className: 'dsev-lib-meta dsev-lib-source', title: r.source || '' },
+          (r.source || '').split(/[\\/]/).pop() || '无源文件'),
         h('div', { className: 'dsev-tags' }, (r.tags || []).map((t) => h('span', { key: t, className: 'dsev-tag' }, t))),
-        h('div', { style: { display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' } },
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); onOpen(r.out) } }, '打开'),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); exportRecord(r) } }, '导出'),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); renameRecord(r) } }, '改名'),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); deleteRecord(r) } }, '删除'),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); editTags(r) } }, '标签'),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); toggleCompare(r.out) } }, '对比'),
-          h('button', { type: 'button', className: 'dsev-btn', onClick: (e) => { e.stopPropagation(); revealRecord(r) } }, '目录')))))
+        h('div', { className: 'dsev-lib-actions' },
+          h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: (e) => { e.stopPropagation(); onOpen(r.out) } }, '打开'),
+          h('details', { className: 'dsev-lib-more', onClick: (e) => e.stopPropagation() },
+            h('summary', { className: 'dsev-btn' }, '更多'),
+            h('div', { className: 'dsev-lib-menu' },
+              h('button', { type: 'button', className: 'dsev-menu-item', onClick: (e) => { e.stopPropagation(); exportRecord(r) } }, '导出'),
+              h('button', { type: 'button', className: 'dsev-menu-item', onClick: (e) => { e.stopPropagation(); renameRecord(r) } }, '改名'),
+              h('button', { type: 'button', className: 'dsev-menu-item', onClick: (e) => { e.stopPropagation(); editTags(r) } }, '标签'),
+              h('button', { type: 'button', className: 'dsev-menu-item', onClick: (e) => { e.stopPropagation(); toggleCompare(r.out) } }, '对比'),
+              h('button', { type: 'button', className: 'dsev-menu-item', onClick: (e) => { e.stopPropagation(); revealRecord(r) } }, '目录'),
+              h('button', { type: 'button', className: 'dsev-menu-item dsev-menu-danger', onClick: (e) => { e.stopPropagation(); deleteRecord(r) } }, '删除')))))))
 
       const buildCard = h('div', { className: 'dsev-build' },
-        h('div', { className: 'dsev-build-title' }, '构建新记录（进入队列，最多 2 个并行）'),
-        h('div', { className: 'dsev-build-grid' },
-          h('label', { className: 'dsev-field' }, '视频路径',
-            h('input', { value: form.video, placeholder: 'D:\\...\\video.mp4', onChange: (e) => setForm({ ...form, video: e.target.value }) })),
-          h('label', { className: 'dsev-field' }, '转写文件（可选，[mm:ss] 格式）',
-            h('input', { value: form.transcript, placeholder: 'D:\\...\\transcript.txt', onChange: (e) => setForm({ ...form, transcript: e.target.value }) })),
-          h('label', { className: 'dsev-field' }, '模式',
-            h('select', { value: form.mode, onChange: (e) => setForm({ ...form, mode: e.target.value }) },
-              ['auto', 'screen', 'action', 'talk'].map((m) => h('option', { key: m, value: m }, m)))),
-          h('label', { className: 'dsev-field' }, '时长（秒）',
-            h('input', { value: form.duration, placeholder: '全部', onChange: (e) => setForm({ ...form, duration: e.target.value }) })),
-          h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', disabled: busy, onClick: enqueue }, busy ? '提交中…' : '加入队列')),
-        h('div', { style: { display: 'flex', gap: 16, marginTop: 8, alignItems: 'center' } },
-          h('label', { className: 'dsev-check' },
-            h('input', { type: 'checkbox', checked: form.asr, onChange: (e) => setForm({ ...form, asr: e.target.checked }) }), '本地 ASR（CPU）'),
-          h('label', { className: 'dsev-check' },
-            h('input', { type: 'checkbox', checked: form.hiLabels, onChange: (e) => setForm({ ...form, hiLabels: e.target.checked }) }), '高分辨率标签（含 URL）'),
-          h('span', { className: 'dsev-meta' }, note)))
+        h('div', {
+          className: 'dsev-build-head',
+          onClick: () => setShowBuild((value) => !value),
+          role: 'button',
+          tabIndex: 0,
+          onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') setShowBuild((value) => !value) },
+        },
+        h('div', { className: 'dsev-build-title' }, '构建新记录'),
+        h('span', { className: 'dsev-meta' }, showBuild ? '收起表单' : '展开表单'),
+        h('span', { className: 'dsev-grow' }),
+        h('button', {
+          type: 'button', className: 'dsev-btn',
+          onClick: (e) => { e.stopPropagation(); setShowBuild((value) => !value) },
+        }, showBuild ? '收起' : '新建')),
+        showBuild
+          ? h('div', null,
+            h('div', { className: 'dsev-build-grid' },
+              h('label', { className: 'dsev-field' }, '视频路径',
+                h('input', { value: form.video, placeholder: 'D:\\...\\video.mp4', onChange: (e) => setForm({ ...form, video: e.target.value }) })),
+              h('label', { className: 'dsev-field' }, '转写文件（可选，[mm:ss] 格式）',
+                h('input', { value: form.transcript, placeholder: 'D:\\...\\transcript.txt', onChange: (e) => setForm({ ...form, transcript: e.target.value }) })),
+              h('label', { className: 'dsev-field' }, '模式',
+                h('select', { value: form.mode, onChange: (e) => setForm({ ...form, mode: e.target.value }) },
+                  ['auto', 'screen', 'action', 'talk'].map((m) => h('option', { key: m, value: m }, m)))),
+              h('label', { className: 'dsev-field' }, '时长（秒）',
+                h('input', { value: form.duration, placeholder: '全部', onChange: (e) => setForm({ ...form, duration: e.target.value }) })),
+              h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', disabled: busy, onClick: enqueue }, busy ? '提交中…' : '加入队列')),
+            h('div', { style: { display: 'flex', gap: 16, marginTop: 8, alignItems: 'center' } },
+              h('label', { className: 'dsev-check' },
+                h('input', { type: 'checkbox', checked: form.asr, onChange: (e) => setForm({ ...form, asr: e.target.checked }) }), '本地 ASR（CPU）'),
+              h('label', { className: 'dsev-check' },
+                h('input', { type: 'checkbox', checked: form.hiLabels, onChange: (e) => setForm({ ...form, hiLabels: e.target.checked }) }), '高分辨率标签（含 URL）'),
+              h('span', { className: 'dsev-meta' }, note)))
+          : null,
+        h('div', { className: 'dsev-meta', style: { marginTop: 6 } }, '提交后进入构建队列（最多 2 个并行）'))
 
       const runningJobs = jobs.filter((j) => j.status !== 'done')
       const jobsCard = jobs.length === 0 ? null : h('div', { className: 'dsev-jobs' },
