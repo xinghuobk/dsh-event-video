@@ -379,7 +379,13 @@ window.__ModuleLoader__.load({
       .dsev-review-main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 26px 40px; }
       .dsev-video-wrap { position: relative; background: #000; border-radius: 12px; overflow: hidden; border: 0.5px solid var(--dsev-border); }
       .dsev-video { display: block; width: 100%; max-height: 54vh; background: #000; }
-      .dsev-video-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 200px; color: var(--dsev-text-3); font-size: 13px; border: 1px dashed var(--dsev-border); border-radius: 12px; background: var(--dsev-surface-2); }
+      .dsev-video-empty { position: relative; display: block; height: 220px; color: var(--dsev-text-3); font-size: 13px; border: 1px dashed var(--dsev-border); border-radius: 12px; overflow: hidden; background: var(--dsev-surface-2); }
+      .dsev-video-empty-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.42; filter: saturate(0.9); }
+      .dsev-video-empty-overlay { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(180deg, rgba(0,0,0,0.2), rgba(0,0,0,0.55)); }
+      .dsev-summary-strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 2px; }
+      .dsev-sum-chip { display: flex; align-items: baseline; gap: 6px; padding: 6px 12px; border: 0.5px solid var(--dsev-border); border-radius: 10px; background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent); }
+      .dsev-sum-chip-label { font-size: 11px; color: var(--dsev-text-3); }
+      .dsev-sum-chip-value { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
       .dsev-video-empty-title { font-size: 14px; font-weight: 600; color: var(--dsev-text-2); }
       .dsev-video-empty-sub { font-size: 12px; opacity: 0.7; }
       .dsev-controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
@@ -1214,8 +1220,16 @@ window.__ModuleLoader__.load({
           onLoadedMetadata: () => setTime(videoRef.current ? videoRef.current.currentTime : 0),
         })
         : h('div', { className: 'dsev-video-empty' },
-          h('div', { className: 'dsev-video-empty-title' }, '这条记录没有关联视频'),
-          h('div', { className: 'dsev-video-empty-sub' }, '仍可查看帧、章节与转写；构建时保留源视频即可播放。'))
+          record && record.thumb
+            ? h('img', {
+              className: 'dsev-video-empty-img',
+              src: '/event-video/thumb?path=' + encodeURIComponent(record.thumb),
+              alt: '',
+            })
+            : null,
+          h('div', { className: 'dsev-video-empty-overlay' },
+            h('div', { className: 'dsev-video-empty-title' }, '这条记录没有关联视频'),
+            h('div', { className: 'dsev-video-empty-sub' }, '仍可查看帧、章节与转写；构建时保留源视频即可播放。')))
 
       const controls = h('div', { className: 'dsev-controls' },
         h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: toggle }, playing ? '暂停' : '播放'),
@@ -1311,7 +1325,20 @@ window.__ModuleLoader__.load({
       const pipelinePct = pipelineState.total
         ? Math.min(100, Math.round(((pipelineState.index || 0) / pipelineState.total) * 100))
         : (pipelineState.running ? 10 : 100)
-      return h('div', { className: 'dsev-review-columns' },
+      const reviewFlags = (data && data.event && data.event.review && data.event.review.flags) || []
+      const summaryStrip = h('div', { className: 'dsev-summary-strip' },
+        [
+          ['时长', fmt(span)],
+          ['章节', chapters.length],
+          ['画面状态', (data.event.states || []).length],
+          ['语元', (data.event.units || []).length],
+          ['审阅标记', reviewFlags.length],
+        ].map(([label, value]) => h('div', { className: 'dsev-sum-chip', key: label },
+          h('span', { className: 'dsev-sum-chip-label' }, label),
+          h('span', { className: 'dsev-sum-chip-value' }, String(value)))))
+      return h('div', { className: 'dsev-review-layout' },
+        summaryStrip,
+        h('div', { className: 'dsev-review-columns' },
         h('div', null,
           h('div', { className: 'dsev-video-wrap' + (playing ? ' dsev-video-playing' : '') }, video),
           src ? seekBar : null,
@@ -1340,13 +1367,20 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'dsev-time' }, fmt(item.t0)),
                   h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))),
             h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, `审阅标记（${reviewFlags.length}）`),
+              reviewFlags.length === 0
+                ? h('div', { className: 'dsev-detail-empty' }, '没有需要人工复核的标记')
+                : reviewFlags.slice(0, 8).map((flag, index) => h('div', { className: 'dsev-flag-row', key: (flag.code || 'flag') + index },
+                  h('span', { className: 'dsev-flag-code' }, flag.code || 'flag'),
+                  h('span', { className: 'dsev-sum-top-title', title: flag.detail || '' }, flag.detail || '')))),
+            h('div', { className: 'dsev-card-box' },
               h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
               chapterRows))),
         h('div', { className: 'dsev-review-side' },
           now,
           h('div', { className: 'dsev-card-box' },
             h('div', { className: 'dsev-card-title' }, '同步转写'),
-            h('div', { className: 'dsev-units' }, unitRows))))
+            h('div', { className: 'dsev-units' }, unitRows)))))
     }
 
     function ReviewPanel() {
