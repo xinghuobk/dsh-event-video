@@ -2212,11 +2212,21 @@ async function startVisionBatch(records, options = {}) {
     if (!insideRoots(out)) throw new Error(`path outside allowed roots: ${out}`)
     if (!existsSync(join(out, 'event.json'))) throw new Error(`not an event record: ${out}`)
   }
+  const policies = Array.isArray(options.priorities) ? options.priorities : []
+  const entries = list.map((out, index) => ({ out, priority: Number(policies[index]) || 0 }))
+  const order = options.order === 'priority' ? 'priority' : 'fifo'
+  const scheduled = [...entries]
+  if (order === 'priority') scheduled.sort((a, b) => b.priority - a.priority)
+  const retry = Math.max(0, Math.min(3, Number(options.retry) || 0))
+  const concurrency = Math.max(1, Math.min(2, Number(options.concurrency) || 1))
+  const deadlineSeconds = Number(options.deadlineSeconds) || 0
+  const deadline = deadlineSeconds > 0 ? Date.now() + deadlineSeconds * 1000 : 0
   const id = `batch-${Date.now()}-${randomUUID().slice(0, 6)}`
   const state = {
     id,
     createdAt: new Date().toISOString(),
     status: 'running',
+    policy: { order, retry, concurrency, deadlineSeconds },
     options: {
       instructions: options.instructions || [],
       samples: options.samples || 3,
@@ -2224,27 +2234,53 @@ async function startVisionBatch(records, options = {}) {
       describe: Boolean(options.describe),
       think: Boolean(options.think),
     },
-    records: list.map((out) => ({ out, status: 'pending' })),
+    executionOrder: scheduled.map((entry) => entry.out),
+    records: entries.map((entry) => ({ out: entry.out, priority: entry.priority, status: 'pending' })),
   }
   BATCH_JOBS.set(id, state)
   await persistBatch(state)
   ;(async () => {
-    for (const item of state.records) {
-      item.status = 'running'
-      item.startedAt = new Date().toISOString()
-      await persistBatch(state)
-      try {
-        const result = await runVisionPipeline(item.out, options)
-        item.status = 'done'
-        item.tickets = result.tickets.length
-        item.seconds = result.seconds
-      } catch (error) {
-        item.status = 'error'
-        item.error = String(error.message)
+    let cursor = 0
+    const worker = async () => {
+      while (cursor < scheduled.length) {
+        const entry = scheduled[cursor]
+        cursor += 1
+        const item = state.records.find((record) => record.out === entry.out)
+        if (deadline > 0 && Date.now() > deadline) {
+          item.status = 'skipped'
+          item.error = 'deadline exceeded'
+          item.finishedAt = new Date().toISOString()
+          await persistBatch(state)
+          continue
+        }
+        item.status = 'running'
+        item.startedAt = new Date().toISOString()
+        item.attempts = 0
+        await persistBatch(state)
+        const maxAttempts = retry + 1
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          item.attempts = attempt
+          try {
+            const result = await runVisionPipeline(item.out, options)
+            item.status = 'done'
+            item.tickets = result.tickets.length
+            item.seconds = result.seconds
+            delete item.error
+            break
+          } catch (error) {
+            item.status = 'error'
+            item.error = String(error.message)
+            if (attempt < maxAttempts) {
+              await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+            }
+          }
+          await persistBatch(state)
+        }
+        item.finishedAt = new Date().toISOString()
+        await persistBatch(state)
       }
-      item.finishedAt = new Date().toISOString()
-      await persistBatch(state)
     }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
     state.status = 'done'
     state.finishedAt = new Date().toISOString()
     await persistBatch(state)
@@ -2253,7 +2289,14 @@ async function startVisionBatch(records, options = {}) {
     state.error = String(error.message)
     await persistBatch(state)
   })
-  return { ok: true, id, records: list.length, status: 'running' }
+  return {
+    ok: true,
+    id,
+    records: list.length,
+    status: 'running',
+    policy: state.policy,
+    executionOrder: state.executionOrder,
+  }
 }
 
 async function runVisionBatchAndWait(records, options = {}) {
@@ -2531,7 +2574,7 @@ const runPipelineTool = {
 
 const runBatchTool = {
   name: 'run_vision_batch',
-  description: 'Queue multiple event records and run the vision pipeline sequentially in the background: per-record status, tickets, timing, and a persisted batch file. Returns when the whole batch finishes (or errors per record without stopping the rest).',
+  description: 'Queue multiple event records and run the vision pipeline in the background with scheduling policies: FIFO or priority order, per-record retries, optional 2-way concurrency, and a deadline after which remaining records are skipped. Per-record status, tickets, timing and a persisted batch file are kept.',
   parameters: {
     type: 'object',
     additionalProperties: false,
@@ -2543,6 +2586,11 @@ const runBatchTool = {
       times: { type: 'array', items: { type: 'number' }, description: 'Optional timestamps applied to every record.' },
       describe: { type: 'boolean', description: 'Also run batch descriptions per record.' },
       think: { type: 'boolean', description: 'Also run key-frame thinking per record.' },
+      order: { type: 'string', enum: ['fifo', 'priority'], description: 'Scheduling order (default fifo).' },
+      priorities: { type: 'array', items: { type: 'number' }, description: 'Per-record priority, aligned with records; higher runs first when order=priority.' },
+      retry: { type: 'number', description: 'Retries per failed record (0-3, default 0).' },
+      concurrency: { type: 'number', description: 'Parallel records (1-2, default 1); 2 only with enough memory.' },
+      deadlineSeconds: { type: 'number', description: 'Stop starting records after this many seconds; remaining are marked skipped.' },
     },
   },
   output: {
@@ -2557,6 +2605,11 @@ const runBatchTool = {
       times: args.times,
       describe: args.describe,
       think: args.think,
+      order: args.order,
+      priorities: args.priorities,
+      retry: args.retry,
+      concurrency: args.concurrency,
+      deadlineSeconds: args.deadlineSeconds,
     })
   },
 }

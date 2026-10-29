@@ -56,4 +56,25 @@ assert.equal(saved.status, 'done')
 await assert.rejects(() => __test.startVisionBatch([], {}), /records is required/)
 await assert.rejects(() => __test.startVisionBatch([join(home, 'missing')], {}), /not an event record/)
 
+const prioritized = await __test.runVisionBatchAndWait(outs, {
+  instructions: ['价格 $220.00'], times: [2], samples: 3,
+  order: 'priority', priorities: [1, 9],
+})
+assert.deepEqual(prioritized.executionOrder, [outs[1], outs[0]])
+assert.equal(prioritized.policy.order, 'priority')
+
+const concurrent = await __test.runVisionBatchAndWait(outs, {
+  instructions: ['价格 $220.00'], times: [2], samples: 3, concurrency: 2,
+})
+assert.ok(concurrent.records.every((item) => item.status === 'done'))
+
+const badOut = join(records, 'bad')
+await mkdir(join(badOut), { recursive: true })
+await writeFile(join(badOut, 'event.json'), '{ not valid json', 'utf8')
+const retried = await __test.runVisionBatchAndWait([badOut], {
+  instructions: ['价格 $220.00'], times: [2], samples: 1, retry: 2,
+})
+assert.equal(retried.records[0].status, 'error')
+assert.equal(retried.records[0].attempts, 3)
+
 console.log('BATCH OK')
