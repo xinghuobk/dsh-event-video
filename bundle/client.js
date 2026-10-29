@@ -446,6 +446,10 @@ window.__ModuleLoader__.load({
       }
       .dsev-lib-card:hover { border-color: rgba(124,140,255,0.55); transform: translateY(-1px); }
       .dsev-lib-card-on { border-color: var(--dsev-accent); box-shadow: 0 0 0 2px rgba(124,140,255,0.25); }
+      .dsev-lib-select { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; accent-color: var(--dsev-accent); cursor: pointer; }
+      .dsev-batch-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+      .dsev-batch-priorities { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+      .dsev-batch-priorities .dsev-check { display: flex; align-items: center; gap: 6px; font-size: 12px; }
       .dsev-lib-thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: var(--dsev-surface-2); }
       .dsev-lib-body { padding: 10px 12px; }
       .dsev-lib-title { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1399,6 +1403,75 @@ window.__ModuleLoader__.load({
 
       const [trash, setTrash] = useState([])
       const [showTrash, setShowTrash] = useState(false)
+      const [selected, setSelected] = useState([])
+      const [batchPolicy, setBatchPolicy] = useState({
+        instructions: '商品价格',
+        order: 'fifo',
+        retry: 1,
+        concurrency: 1,
+        deadlineSeconds: 0,
+        priorities: {},
+      })
+      const [batch, setBatch] = useState({ running: false, id: null, progress: null, note: '' })
+      const batchTimer = useRef(null)
+      useEffect(() => () => { if (batchTimer.current) clearInterval(batchTimer.current) }, [])
+      const toggleSelect = (out) => {
+        setSelected((prev) => prev.includes(out) ? prev.filter((item) => item !== out) : [...prev, out])
+      }
+      const startBatch = () => {
+        const instructions = batchPolicy.instructions
+          .split(/[,，;；]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+        if (selected.length === 0) { setBatch({ running: false, id: null, progress: null, note: '先勾选记录' }); return }
+        if (instructions.length === 0) { setBatch({ running: false, id: null, progress: null, note: '先填要定位的元素' }); return }
+        const body = {
+          records: selected,
+          instructions,
+          samples: 3,
+          order: batchPolicy.order,
+          retry: Number(batchPolicy.retry) || 0,
+          concurrency: Number(batchPolicy.concurrency) || 1,
+          deadlineSeconds: Number(batchPolicy.deadlineSeconds) || 0,
+          priorities: batchPolicy.order === 'priority'
+            ? selected.map((out) => Number(batchPolicy.priorities[out]) || 0)
+            : undefined,
+        }
+        setBatch({ running: true, id: null, progress: null, note: '已提交，等待进度…' })
+        fetch('/event-video/batch', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then((r) => r.json()).then((value) => {
+          if (!value.ok) {
+            setBatch({ running: false, id: null, progress: null, note: value.error || '批量提交失败' })
+            return
+          }
+          setBatch((prev) => ({ ...prev, id: value.id, note: '运行中…' }))
+          batchTimer.current = setInterval(() => {
+            fetch('/event-video/batch-progress?id=' + encodeURIComponent(value.id))
+              .then((r) => r.json())
+              .then((progress) => {
+                const running = progress.status === 'running'
+                setBatch((prev) => ({ ...prev, progress, running }))
+                if (!running) {
+                  if (batchTimer.current) clearInterval(batchTimer.current)
+                  batchTimer.current = null
+                  const rows = progress.records || []
+                  const done = rows.filter((item) => item.status === 'done').length
+                  const failed = rows.filter((item) => item.status === 'error').length
+                  const skipped = rows.filter((item) => item.status === 'skipped').length
+                  setBatch((prev) => ({
+                    ...prev,
+                    running: false,
+                    note: `完成：${done} 成功${failed ? `，${failed} 失败` : ''}${skipped ? `，${skipped} 跳过` : ''}`,
+                  }))
+                  onRefresh()
+                }
+              }).catch(() => {})
+          }, 800)
+        }).catch(() => setBatch({ running: false, id: null, progress: null, note: '批量请求失败' }))
+      }
       const loadTrash = () => {
         fetch('/event-video/trash').then((r) => r.json()).then((d) => setTrash(d.items || [])).catch(() => {})
       }
@@ -1497,6 +1570,14 @@ window.__ModuleLoader__.load({
         className: 'dsev-lib-card' + (compare.includes(r.out) ? ' dsev-lib-card-on' : ''),
         onClick: () => onOpen(r.out),
       },
+      h('input', {
+        type: 'checkbox',
+        className: 'dsev-lib-select',
+        checked: selected.includes(r.out),
+        title: '选中用于批量证据工单',
+        onClick: (e) => e.stopPropagation(),
+        onChange: () => toggleSelect(r.out),
+      }),
       r.thumb
         ? h('img', { className: 'dsev-lib-thumb', src: '/event-video/thumb?path=' + encodeURIComponent(r.thumb), alt: '' })
         : h('div', { className: 'dsev-lib-thumb' }),
@@ -1578,6 +1659,73 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: 'dsev-btn', onClick: () => restoreTrash(t.dir) }, '恢复'))))
         : null
 
+      const selectedRecords = selected.map((out) => records.find((r) => r.out === out)).filter(Boolean)
+      const batchProgress = batch.progress
+      const batchRows = batchProgress && Array.isArray(batchProgress.records) ? batchProgress.records : []
+      const batchTotal = batchRows.length || selected.length || 1
+      const batchDone = batchRows.filter((item) => ['done', 'error', 'skipped'].includes(item.status)).length
+        || batchRows.filter((item) => item.status === 'done').length
+      const batchPct = batchProgress
+        ? Math.min(100, Math.round((batchDone / batchTotal) * 100))
+        : (batch.running ? 5 : 0)
+      const priorityFields = batchPolicy.order === 'priority' && selectedRecords.length > 0
+        ? h('div', { className: 'dsev-batch-priorities' },
+          selectedRecords.map((r) => h('label', { key: r.out, className: 'dsev-check' },
+            h('span', { style: { maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+              r.title || r.name || r.dir),
+            h('input', {
+              type: 'number', min: 0, max: 99, className: 'dsev-input', style: { width: 64 },
+              value: batchPolicy.priorities[r.out] ?? 0,
+              onClick: (e) => e.stopPropagation(),
+              onChange: (e) => setBatchPolicy((prev) => ({
+                ...prev,
+                priorities: { ...prev.priorities, [r.out]: e.target.value },
+              })),
+            }))))
+        : null
+      const batchCard = h('div', { className: 'dsev-card-box dsev-batch' },
+        h('div', { className: 'dsev-card-title' }, `批量证据工单（已选 ${selected.length}）`),
+        h('div', { className: 'dsev-batch-row' },
+          h('input', {
+            className: 'dsev-input', style: { flex: 1, minWidth: 200 },
+            placeholder: '要定位的元素，逗号分隔',
+            value: batchPolicy.instructions,
+            onChange: (e) => setBatchPolicy((prev) => ({ ...prev, instructions: e.target.value })),
+          }),
+          h('select', {
+            className: 'dsev-select', value: batchPolicy.order,
+            onChange: (e) => setBatchPolicy((prev) => ({ ...prev, order: e.target.value })),
+          }, h('option', { value: 'fifo' }, 'FIFO 顺序'), h('option', { value: 'priority' }, '优先级')),
+          h('label', { className: 'dsev-check' }, '重试',
+            h('input', {
+              type: 'number', min: 0, max: 3, className: 'dsev-input', style: { width: 54 },
+              value: batchPolicy.retry,
+              onChange: (e) => setBatchPolicy((prev) => ({ ...prev, retry: e.target.value })),
+            })),
+          h('label', { className: 'dsev-check' }, '并发',
+            h('input', {
+              type: 'number', min: 1, max: 2, className: 'dsev-input', style: { width: 54 },
+              value: batchPolicy.concurrency,
+              onChange: (e) => setBatchPolicy((prev) => ({ ...prev, concurrency: e.target.value })),
+            })),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => setSelected(records.map((r) => r.out)) }, '全选'),
+          h('button', { type: 'button', className: 'dsev-btn', onClick: () => setSelected([]) }, '清空'),
+          h('button', {
+            type: 'button', className: 'dsev-btn dsev-btn-primary',
+            disabled: batch.running || selected.length === 0, onClick: startBatch,
+          }, batch.running ? '批量运行中…' : '开始批量')),
+        priorityFields,
+        batch.running || batchProgress
+          ? h('div', { className: 'dsev-progress' },
+            h('div', { className: 'dsev-progress-track' },
+              h('div', { className: 'dsev-progress-fill', style: { width: `${batchPct}%` } })),
+            h('div', { className: 'dsev-progress-label' },
+              batch.running
+                ? `运行中 ${batchDone}/${batchTotal}${batchProgress && batchProgress.records ? ` · ${(batchProgress.records.find((item) => item.status === 'running') || {}).out || ''}` : ''}`
+                : (batch.note || '完成')))
+          : null,
+        batch.note && !batch.running ? h('div', { className: 'dsev-meta', style: { marginTop: 8 } }, batch.note) : null)
+
       return h('div', { className: 'dsev-library' },
         h('div', { className: 'dsev-lib-toolbar' },
           h('input', {
@@ -1587,6 +1735,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => { loadJobs(); onRefresh() } }, '刷新'),
           h('button', { type: 'button', className: 'dsev-btn', onClick: () => { loadTrash(); setShowTrash(!showTrash) } }, '回收站'),
           h('span', { className: 'dsev-meta' }, `${filtered.length} / ${records.length} 条`)),
+        batchCard,
         buildCard,
         jobsCard,
         compareCard,
