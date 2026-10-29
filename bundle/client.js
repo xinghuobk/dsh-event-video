@@ -500,6 +500,75 @@ window.__ModuleLoader__.load({
       .dsev-flag-count { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--dsev-text-3); }
       .dsev-sum-top { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 0.5px solid var(--dsev-border); font-size: 12px; }
       .dsev-sum-top-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsev-text-2); }
+
+      /* --- polish pass: micro-interactions, depth, motion --- */
+      .dsev { font-feature-settings: "cv02", "cv03", "cv04", "ss01"; }
+      .dsev-btn { transition: transform 0.12s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease; }
+      .dsev-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22); }
+      .dsev-btn:active { transform: translateY(0) scale(0.98); }
+      .dsev-btn-primary { background: linear-gradient(135deg, #7c8cff, #6a5cff); box-shadow: 0 6px 18px rgba(124, 140, 255, 0.28); }
+      .dsev-btn-primary:hover { box-shadow: 0 12px 26px rgba(124, 140, 255, 0.4); }
+      .dsev-btn:focus-visible, .dsev-input:focus-visible, .dsev-select:focus-visible, .dsev-record-select:focus-visible {
+        outline: none; box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.32);
+      }
+      .dsev-tab { border-radius: 8px; transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease; }
+      .dsev-tab:hover { background: rgba(124, 140, 255, 0.09); }
+      .dsev-tab-on { background: linear-gradient(180deg, rgba(124, 140, 255, 0.22), rgba(124, 140, 255, 0.07)); box-shadow: inset 0 0 0 1px rgba(124, 140, 255, 0.26); }
+      .dsev-noside .dsev-topbar-wrap {
+        position: sticky; top: 0; z-index: 6;
+        background: color-mix(in srgb, var(--dsev-surface) 80%, transparent);
+        backdrop-filter: blur(12px) saturate(1.15);
+        border-bottom: 0.5px solid transparent;
+      }
+      .dsev-lib-card { transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
+      .dsev-lib-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(124, 140, 255, 0.28);
+      }
+      .dsev-lib-card img { transition: transform 0.35s ease, filter 0.35s ease; }
+      .dsev-lib-card:hover img { transform: scale(1.04); filter: saturate(1.1) brightness(1.03); }
+      .dsev-video-wrap { box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.04); transition: box-shadow 0.3s ease; }
+      .dsev-video-playing { box-shadow: 0 18px 54px rgba(124, 140, 255, 0.28), inset 0 0 0 1px rgba(124, 140, 255, 0.28); }
+      .dsev-seek { transition: height 0.15s ease; }
+      .dsev-seek:hover { height: 10px; }
+      .dsev-seek-head { transition: transform 0.12s ease; }
+      .dsev-seek:hover .dsev-seek-head { transform: scale(1.25); }
+      .dsev-ch { position: relative; transition: background 0.15s ease, transform 0.15s ease; }
+      .dsev-ch:hover { background: rgba(124, 140, 255, 0.07); transform: translateX(2px); }
+      .dsev-ch-on::before {
+        content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2.5px;
+        border-radius: 2px; background: var(--dsev-accent); box-shadow: 0 0 10px rgba(124, 140, 255, 0.8);
+      }
+      .dsev-card-box { transition: border-color 0.2s ease, background 0.2s ease; }
+      .dsev-card-box:hover { border-color: rgba(124, 140, 255, 0.28); }
+      .dsev-now { background: linear-gradient(180deg, rgba(124, 140, 255, 0.09), transparent 70%), var(--dsev-surface); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2); }
+      .dsev-batch { background: linear-gradient(180deg, rgba(124, 140, 255, 0.07), transparent 62%), var(--dsev-surface); }
+      .dsev-batch-running { border-color: rgba(124, 140, 255, 0.5); box-shadow: 0 0 0 1px rgba(124, 140, 255, 0.25), 0 0 26px rgba(124, 140, 255, 0.16); }
+      .dsev-progress-fill {
+        background: linear-gradient(90deg, #7c8cff, #a78bfa 50%, #7c8cff);
+        background-size: 200% 100%;
+        animation: dsev-shimmer 1.6s linear infinite;
+        box-shadow: 0 0 12px rgba(124, 140, 255, 0.5);
+      }
+      @keyframes dsev-shimmer { from { background-position: 0% 0; } to { background-position: -200% 0; } }
+      .dsev-badge-dot { animation: dsev-pulse 2s ease-in-out infinite; }
+      @keyframes dsev-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.45); }
+        50% { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0); }
+      }
+      .dsev-empty { background: radial-gradient(600px 200px at 50% 0%, rgba(124, 140, 255, 0.08), transparent 70%); }
+      .dsev-lib-select { accent-color: var(--dsev-accent); transition: transform 0.12s ease; }
+      .dsev-lib-select:checked { transform: scale(1.08); }
+      .dsev-grid-cards > * { animation: dsev-rise 0.35s ease both; }
+      .dsev-grid-cards > *:nth-child(2) { animation-delay: 0.03s; }
+      .dsev-grid-cards > *:nth-child(3) { animation-delay: 0.06s; }
+      .dsev-grid-cards > *:nth-child(4) { animation-delay: 0.09s; }
+      .dsev-grid-cards > *:nth-child(5) { animation-delay: 0.12s; }
+      .dsev-grid-cards > *:nth-child(6) { animation-delay: 0.15s; }
+      @keyframes dsev-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        .dsev, .dsev * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+      }
     `
 
     function Mark({ className, size }) {
@@ -1242,7 +1311,7 @@ window.__ModuleLoader__.load({
         : (pipelineState.running ? 10 : 100)
       return h('div', { className: 'dsev-review-columns' },
         h('div', null,
-          h('div', { className: 'dsev-video-wrap' }, video),
+          h('div', { className: 'dsev-video-wrap' + (playing ? ' dsev-video-playing' : '') }, video),
           src ? seekBar : null,
           controls,
           pipelineState.running || pipelineState.total
@@ -1683,7 +1752,7 @@ window.__ModuleLoader__.load({
               })),
             }))))
         : null
-      const batchCard = h('div', { className: 'dsev-card-box dsev-batch' },
+      const batchCard = h('div', { className: 'dsev-card-box dsev-batch' + (batch.running ? ' dsev-batch-running' : '') },
         h('div', { className: 'dsev-card-title' }, `批量证据工单（已选 ${selected.length}）`),
         h('div', { className: 'dsev-batch-row' },
           h('input', {
