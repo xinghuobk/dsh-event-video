@@ -2179,6 +2179,94 @@ async function runVisionPipeline(out, options = {}) {
   return { ok: true, out, stages, tickets, seconds: data.seconds, path: target }
 }
 
+const BATCH_JOBS = new Map()
+
+function batchPath(id) {
+  return join(HOME, 'batches', `${id}.json`)
+}
+
+async function persistBatch(state) {
+  try {
+    await fs.mkdir(join(HOME, 'batches'), { recursive: true })
+    await fs.writeFile(batchPath(state.id), JSON.stringify(state, null, 1))
+  } catch {
+    /* batch state is best-effort on disk */
+  }
+}
+
+async function readBatchProgress(id) {
+  if (!id) throw new Error('id is required')
+  if (BATCH_JOBS.has(id)) return BATCH_JOBS.get(id)
+  try {
+    return JSON.parse(await fs.readFile(batchPath(id), 'utf8'))
+  } catch {
+    throw new Error(`batch not found: ${id}`)
+  }
+}
+
+async function startVisionBatch(records, options = {}) {
+  const list = (Array.isArray(records) ? records : []).map(String).filter(Boolean)
+  if (list.length === 0) throw new Error('records is required')
+  if (list.length > 20) throw new Error('at most 20 records per batch')
+  for (const out of list) {
+    if (!insideRoots(out)) throw new Error(`path outside allowed roots: ${out}`)
+    if (!existsSync(join(out, 'event.json'))) throw new Error(`not an event record: ${out}`)
+  }
+  const id = `batch-${Date.now()}-${randomUUID().slice(0, 6)}`
+  const state = {
+    id,
+    createdAt: new Date().toISOString(),
+    status: 'running',
+    options: {
+      instructions: options.instructions || [],
+      samples: options.samples || 3,
+      times: options.times || null,
+      describe: Boolean(options.describe),
+      think: Boolean(options.think),
+    },
+    records: list.map((out) => ({ out, status: 'pending' })),
+  }
+  BATCH_JOBS.set(id, state)
+  await persistBatch(state)
+  ;(async () => {
+    for (const item of state.records) {
+      item.status = 'running'
+      item.startedAt = new Date().toISOString()
+      await persistBatch(state)
+      try {
+        const result = await runVisionPipeline(item.out, options)
+        item.status = 'done'
+        item.tickets = result.tickets.length
+        item.seconds = result.seconds
+      } catch (error) {
+        item.status = 'error'
+        item.error = String(error.message)
+      }
+      item.finishedAt = new Date().toISOString()
+      await persistBatch(state)
+    }
+    state.status = 'done'
+    state.finishedAt = new Date().toISOString()
+    await persistBatch(state)
+  })().catch(async (error) => {
+    state.status = 'error'
+    state.error = String(error.message)
+    await persistBatch(state)
+  })
+  return { ok: true, id, records: list.length, status: 'running' }
+}
+
+async function runVisionBatchAndWait(records, options = {}) {
+  const started = await startVisionBatch(records, options)
+  const deadline = Date.now() + 2 * 60 * 60 * 1000
+  while (Date.now() < deadline) {
+    const state = await readBatchProgress(started.id)
+    if (state.status !== 'running' && state.status !== 'queued') return { ok: true, ...state }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  throw new Error(`batch timed out: ${started.id}`)
+}
+
 function serveFrameImage(res, path) {
   fs.stat(path).then((stat) => {
     res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': stat.size, 'cache-control': 'no-store' })
@@ -2432,6 +2520,38 @@ const runPipelineTool = {
   timeoutMs: 1800000,
   async execute(args) {
     return runVisionPipeline(args.out, {
+      instructions: args.instructions,
+      samples: args.samples,
+      times: args.times,
+      describe: args.describe,
+      think: args.think,
+    })
+  },
+}
+
+const runBatchTool = {
+  name: 'run_vision_batch',
+  description: 'Queue multiple event records and run the vision pipeline sequentially in the background: per-record status, tickets, timing, and a persisted batch file. Returns when the whole batch finishes (or errors per record without stopping the rest).',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['records', 'instructions'],
+    properties: {
+      records: { type: 'array', items: { type: 'string' }, description: 'Event record output directories (max 20).' },
+      instructions: { type: 'array', items: { type: 'string' }, description: 'Element descriptions for every record.' },
+      samples: { type: 'number', description: 'Grounding consensus samples 1-3 (default 3).' },
+      times: { type: 'array', items: { type: 'number' }, description: 'Optional timestamps applied to every record.' },
+      describe: { type: 'boolean', description: 'Also run batch descriptions per record.' },
+      think: { type: 'boolean', description: 'Also run key-frame thinking per record.' },
+    },
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 1) }],
+  },
+  timeoutMs: 7200000,
+  async execute(args) {
+    return runVisionBatchAndWait(args.records, {
       instructions: args.instructions,
       samples: args.samples,
       times: args.times,
@@ -2741,6 +2861,24 @@ function handler(req, res) {
         sendJson(res, 200, await groundUiElement(body.out, body.t, body.instruction))
       } catch (error) {
         sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/batch' && req.method === 'POST') {
+      const body = await readBody(req)
+      try {
+        sendJson(res, 200, await startVisionBatch(body.records, body))
+      } catch (error) {
+        sendJson(res, 400, { error: String(error.message) })
+      }
+      return
+    }
+    if (route === '/event-video/batch-progress' && req.method === 'GET') {
+      const id = url.searchParams.get('id') || ''
+      try {
+        sendJson(res, 200, await readBatchProgress(id))
+      } catch (error) {
+        sendJson(res, 404, { error: String(error.message) })
       }
       return
     }
@@ -3424,6 +3562,7 @@ export function apply(ctx, config) {
     ctx.effect(() => ctx.tools.register(fuseVisionTool), 'event-video: fuse tool')
     ctx.effect(() => ctx.tools.register(fuseWorkItemTool), 'event-video: fuse ticket tool')
     ctx.effect(() => ctx.tools.register(runPipelineTool), 'event-video: pipeline tool')
+    ctx.effect(() => ctx.tools.register(runBatchTool), 'event-video: batch tool')
   }
   ctx.effect(() => ctx.tools.register(exportTool), 'event-video: export tool')
   ctx.effect(() => ctx.tools.register(summaryTool), 'event-video: summary tool')
@@ -3486,6 +3625,10 @@ export const __test = {
   fuseWorkItemTool,
   runVisionPipeline,
   runPipelineTool,
+  runVisionBatchAndWait,
+  startVisionBatch,
+  readBatchProgress,
+  runBatchTool,
   readPipelineProgress,
   groundConsensus,
   checkDescriptionWithOcr,
