@@ -2,8 +2,9 @@
 
 ![banner](assets/banner.svg)
 
-**Every second, accounted for.**
-Turn hour-long recordings into **verifiable event records** — visual states, speech units, semantic chapters, attention, and deterministic review flags, every one anchored to a timestamp.
+Local video review for DeepSeek Harness.
+
+Feed it a screen recording or a meeting video. It writes a timestamped record of what was on screen, what was said, and where the page or topic changed. The same record drives a review panel where you can watch, jump to a moment, leave notes and export tickets.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-7c8cff.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-52c7bd.svg)](engine/pyproject.toml)
@@ -14,28 +15,20 @@ Turn hour-long recordings into **verifiable event records** — visual states, s
 
 ![event record timeline](assets/demo-timeline.gif)
 
-*A 50-second synthetic review built by the engine: states (blue), transitions (teal), time ruler, gates and review flags — rendered from the real `event.json`.*
+*A 50-second demo record built by the engine: states, transitions, time ruler, gates and review flags, rendered from the real `event.json`.*
 
-## Why
+## What it is for
 
-A 55-minute design review contains hundreds of decisions, but an LLM cannot watch a video, and sampling "a few key frames" silently drops details. Summaries lose the exact words, the page that was open, and the moment something changed.
+An hour of screen recording is slow to review. Skipping through it loses the exact words and the page that was open. Asking a model to summarize throws the evidence away.
 
-This project treats a video as an **event stream** instead:
+This tool keeps the evidence instead:
 
-- visual states and transitions cover the whole timeline with no gaps;
-- speech is split into timestamped units and aligned to what changed on screen;
-- chapters follow page switches and topic shifts, not a fixed clock;
-- every build carries a **deterministic review block** that flags what a human should double-check.
+- screen states and transitions cover the whole timeline;
+- speech is split into timestamped units and matched against screen changes;
+- chapters follow page switches and topic shifts;
+- every build ends with review flags naming what a human should check.
 
-The result is a JSON event record an agent can reason over, plus a review workbench where a human can watch, seek, and verify the same timeline.
-
-| | Frame sampling + summary | DSH Event Video |
-|---|---|---|
-| Coverage | a handful of frames (often ~1%) | every state + transition, partitioned with gates |
-| Evidence | "it said something about pricing" | timestamped speech unit + the page open at that moment |
-| Navigation | trust the summary | chapters tied to page switches and topic shifts |
-| Trust | read and hope | deterministic review flags name what to double-check |
-| Output | a paragraph | `event.json` + Markdown / CSV / Word / Excel |
+The output is `event.json`, plus a workbench for watching and verifying it.
 
 ## Try the 50-second demo
 
@@ -154,21 +147,16 @@ Use DSH's plugin manager with `install_bundle` and the `bundle/` directory as ta
 
 **3. Use it**
 
-- Agent tool: `build_video_event(video, transcript | asr, mode?, hi_labels?)`, then `review_video_event(out)` and report the flags.
-- Key-frame thinking: `describe_video_frames(out, keyFrames=true, think=true)` samples chapter starts, annotations and top-attention states, then asks a reasoning VLM (`vlmThinkModel`, default `qwen3-vl:8b`) with a larger budget; the player has a **关键帧思考** button. Local compute only, no API tokens.
-- Voice: `speak_text(text)` speaks locally (Windows SAPI by default, or `ttsCommand` / OpenAI-compatible `ttsEndpoint`); `camera_voice_react(kinds, timeoutS, template)` waits for a camera event and responds aloud in one call (`{kind}` / `{time}` / `{gesture}` / `{smile}`).
-- VLM descriptions: `describe_video_frames(out, limit?)` samples states and asks a configured VLM (Ollama `/api/chat` or OpenAI-compatible, `vlmEndpoint`/`vlmModel`) for factual descriptions, stored in `vision.json`.
-- Work items: `export_work_items(out, kind)` writes tickets.md/csv/json (from annotations + review flags, each with time/frame/acceptance) or an ordered SOP from chapters; player has **工单** / **SOP** buttons.
-- Annotations: `annotate_video_record(out, t0, text)` / `list_video_annotations(out)` write a timestamped note with a frame anchor to `annotations.json` (event.json is never modified); the player shows notes and a **标注** button.
-- Library search: `search_video_library(query)` returns ranked timestamped hits (record, mm:ss, frame, quote) across every analyzed video; `ask_video_library(question)` returns an evidence pack with citation guidance. Refresh page for the 汇总 search box.
-- Element grounding: `ground_ui_element(out, t, instruction)` asks UI-TARS-7B (llama.cpp) for the pixel point of a described element, caches per frame+instruction, returns `{point, raw, frame}`.
-- Exact text: `ocr_video_frame(out, t)` runs the configured OCR command (PaddleOCR-VL first, classic fallback), caches per frame and returns `{engine,text,lines,frame}`; use it for verbatim URLs/labels instead of VLM descriptions.
-- Evidence fusion: `fuse_vision_evidence(out, t, instruction, samples?)` cross-checks OCR text+box against UI-TARS grounding, optionally with 3 paraphrased samples for coordinate consensus, and flags VLM-description↔OCR contradictions; returns calibrated confidence, conflicts and per-expert evidence.
-- Fused ticket: `fuse_to_work_item(out, t, instruction, samples?, title?)` turns a fused result into one ticket (element, box, point, confidence, conflicts, acceptance) exported under `exports/`.
-- Library batch UI: multi-select record cards, policy controls (FIFO/priority + per-record priority, retry, concurrency), shared instruction input and a batch progress bar; runs `POST /event-video/batch` and polls `batch-progress`. `n- Batch scheduling: `run_vision_batch(records, instructions, samples?, times?, describe?, think?)` queues up to 20 records with scheduling policies (`order` fifo/priority + `priorities`, `retry` 0-3, `concurrency` 1-2, `deadlineSeconds`), keeps per-record status/attempts, writes a batch file under `<dataHome>/batches/`, and keeps going when one record fails (`GET /event-video/batch-progress?id=`).`n- Pipeline tool: `run_vision_pipeline(out, instructions, samples?, times?, describe?, think?)` runs descriptions / key-frame thinking / fused tickets in one call at key timestamps (top attention + chapter starts by default) and writes `pipeline.json`. The player has an **证据工单** input + button that calls it and polls `pipeline-progress.json` and shows a progress bar with stage/index.
-- Frame check: `read_video_frame(out, t)` returns the frame at a timestamp plus scene label, chapter and nearby speech; the model then calls `read_image` on the path to actually see it (also wired to the **看帧** button in the player).
-- Export: `export_video_analysis(out)` writes `analysis.md`, `chapters.csv`, `analysis.docx`, `analysis.xlsx` and raw `event.json` under the data home's `exports/`; `summarize_video_analyses()` returns a one-shot overview of every record (totals, review-flag counts, cross-record attention leaders).
-- Design rules and the industry practice they borrow (Frame.io timecoded comments, Linear calm chrome, NN/g video control, Mux player, Raycast actions): [docs/DESIGN.md](docs/DESIGN.md).`n- UI: sidebar **Video Review** opens on the **Library** (home): pick a record card to enter Review (player + synced transcript + summary chips + evidence cards); **← 库** returns; Overview/Summary/Camera are secondary tabs and AI actions are collapsed under **AI 工具**.
+The main tools:
+
+- `build_video_event(video, transcript | asr, mode?, hi_labels?)` builds a record; `review_video_event(out)` returns the review flags.
+- `read_video_frame(out, t)` and `ocr_video_frame(out, t)` pull a frame or its exact text at a timestamp.
+- `describe_video_frames(out, keyFrames?, think?)` asks the configured VLM for short descriptions (Ollama or any OpenAI-compatible endpoint).
+- `annotate_video_record` / `list_video_annotations` / `reply_video_annotation` keep timecoded notes and replies. `fuse_vision_evidence` cross-checks OCR against UI-TARS grounding, and `fuse_to_work_item` writes that into a ticket.
+- `export_work_items(out, kind)` writes tickets or an SOP; `export_video_analysis(out)` writes Markdown, CSV, Word and Excel.
+- `run_vision_batch(records, ...)` and `run_vision_pipeline(out, ...)` run the same work over several videos.
+
+The UI is one sidebar entry with Home, Library, Review and Settings. See [docs/DESIGN.md](docs/DESIGN.md) for the layout rules and [docs/VISION.md](docs/VISION.md) for the model stack.
 
 ## Camera (Windows, opt-in)
 

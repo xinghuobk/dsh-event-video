@@ -2,9 +2,9 @@
 
 ![banner](assets/banner.svg)
 
-**每一秒，都有据可查。**
+给 DeepSeek Harness 用的本地视频审阅工具。
 
-把一小时的录屏变成**可验证的事件记录**：画面状态、语音语元、语义章节、注意力，以及确定性的审阅标记——全部锚定到时间戳。
+丢一个录屏或会议视频进来，它会写一份带时间戳的记录：画面里是什么、说了什么、页面或话题什么时候变的。同一份记录驱动审阅面板：看片、跳到某一刻、写标注、导出工单。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-7c8cff.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-52c7bd.svg)](engine/pyproject.toml)
@@ -15,20 +15,20 @@
 
 ![事件记录时间线](assets/demo-timeline.gif)
 
-*50 秒合成评审的引擎产物：状态（蓝）、转移（青）、时间尺、校验与审阅标记，直接由真实 vent.json 渲染。*
+*50 秒演示记录：画面状态、转移、时间尺、校验和审阅标记，直接由真实的 `event.json` 渲染。*
 
-## 为什么做这个
+## 用来做什么
 
-一场 55 分钟的设计评审里有几百个决定，但模型看不了视频；"抽几帧关键画面"又会悄悄漏掉细节——原话、当时打开的是哪个页面、哪一刻发生了变化，全都丢了。
+一小时的录屏审起来很慢。快进会漏掉原话和当时打开的页面，直接让模型总结又拿不出证据。
 
-这个项目不把视频当"图片流"，而是当**事件流**：
+这个工具把证据留下：
 
-- 画面状态 + 状态转移**连续覆盖**整条时间线，不跳段；
-- 语音切成带时间戳的语元，并和"画面变化"对齐；
-- 章节按页面切换与话题转折切分，而不是固定时间窗；
-- 每次构建都自带**确定性审阅块**，点名需要人工复核的地方。
+- 画面状态和转移覆盖整条时间线；
+- 语音切成带时间戳的小段，和画面变化对上；
+- 章节按页面切换和话题变化切分；
+- 每次构建都会列出需要人工确认的地方。
 
-产物是一份智能体能推理的 JSON 事件记录，外加一个"边看边核对"的审阅工作台。
+产物是 `event.json`，以及一个边看边核对的面板。
 
 ## 产物
 
@@ -143,21 +143,16 @@ npm install --install-links --legacy-peer-deps "file:/path/to/dsh-event-video/pl
 
 **3. 使用**
 
-- 模型工具：`build_video_event(video, transcript | asr, mode?, hi_labels?)` → `review_video_event(out)` → 汇报审阅标记；
-- 关键帧思考：`describe_video_frames(out, keyFrames=true, think=true)` 只取章节起点/标注点/注意力最高帧，用推理模型（`vlmThinkModel`，默认 `qwen3-vl:8b`）+ 更大预算生成结论式描述；播放器有 **关键帧思考** 按钮。本地算力，不花 API token。
-- 语音：`speak_text(text)` 本地发声（默认 Windows SAPI，也可配 `ttsCommand` 或 OpenAI 兼容 `ttsEndpoint`）；`camera_voice_react(kinds, timeoutS, template)` 等待摄像头事件后一句话回应（模板支持 `{kind}`/`{time}`/`{gesture}`/`{smile}`）。
-- VLM 画面描述：`describe_video_frames(out, limit?)` 抽样状态帧，调用配置的 VLM（Ollama `/api/chat` 或 OpenAI 兼容，`vlmEndpoint`/`vlmModel`）生成事实描述，写入 `vision.json`。
-- 行动项交付：`export_work_items(out, kind)` 生成 tickets.md/csv/json（来源：标注 + 审阅标记，逐条带时间/帧/验收）或按章节生成 SOP；播放器有 **工单** / **SOP** 按钮。
-- 时间轴标注：`annotate_video_record(out, t0, text)` / `list_video_annotations(out)` 写入带帧锚点的 `annotations.json`（不改 event.json）；播放器有「标注」按钮和标注列表。
-- 跨库检索：`search_video_library(query)` 返回带时间戳/帧/原话的排序结果；`ask_video_library(question)` 返回证据包并附带引用规范。「汇总」页可搜。
-- 元素定位：`ground_ui_element(out, t, instruction)` 调用 UI-TARS-7B（llama.cpp）返回目标元素的像素坐标，按帧+指令缓存，返回 `{point, raw, frame}`。
-- 精确文字：`ocr_video_frame(out, t)` 调用配置的 OCR 命令（优先 PaddleOCR-VL，回退经典 PaddleOCR），按帧缓存，返回 `{engine,text,lines,frame}`；URL/小字以它为准，不要用 VLM 描述。
-- 证据融合：`fuse_vision_evidence(out, t, instruction, samples?)` 用 OCR 文本框校验 UI-TARS 定位点，可传 3 次指令改写做坐标共识，并检测 VLM 描述与 OCR 文本的矛盾；返回校准置信度、冲突和分专家证据。
-- 融合工单：`fuse_to_work_item(out, t, instruction, samples?, title?)` 把融合结果直接生成一张工单（元素、框、点、置信度、冲突、验收标准），输出到 `exports/`。
-- 批量调度：`run_vision_batch(records, instructions, samples?, times?, describe?, think?)` 最多 20 条记录排队串行跑流水线，逐条记录状态，批次文件写到 `<数据目录>/batches/`；单条失败不影响后续（`GET /event-video/batch-progress?id=`）。`n- 流水线工具：`run_vision_pipeline(out, instructions, samples?, times?, describe?, think?)` 一次跑完描述/关键帧思考/融合工单（默认取注意力最高帧+章节起点），写 `pipeline.json`。
-- 看帧：`read_video_frame(out, t)` 返回该时间点的帧路径 + 画面标签/章节/邻近原话，模型再对路径调用 `read_image` 真正看图（播放器里的 **看帧** 按钮同源）。
-- 导出：`export_video_analysis(out)` 生成 `analysis.md`、`chapters.csv`、`analysis.docx`、`analysis.xlsx` 和原始 `event.json`（写到数据目录 `exports/`）；`summarize_video_analyses()` 一次性返回所有记录的总览（总量、审阅标记分布、跨记录注意力最高段落）；
-- 界面：侧栏「视频审阅」→ 审阅（播放器 + 同步转写）、总览（Gantt + 章节）、库（缩略图、搜索、标签、对比、队列、回收站）、汇总（所有分析一屏总览 + 一键导出）、摄像头。
+主要工具：
+
+- `build_video_event(...)` 生成记录；`review_video_event(out)` 返回审阅标记。
+- `read_video_frame(out, t)` / `ocr_video_frame(out, t)` 取某一刻的画面或精确文字。
+- `describe_video_frames(out, keyFrames?, think?)` 让配置的 VLM 写简短描述（Ollama 或任意 OpenAI 兼容接口）。
+- `annotate_video_record` / `list_video_annotations` / `reply_video_annotation` 记录带时间码的标注和回复；`fuse_vision_evidence` 用 OCR 交叉校验 UI-TARS 定位，`fuse_to_work_item` 直接写成工单。
+- `export_work_items(out, kind)` 导出工单或 SOP；`export_video_analysis(out)` 导出 Markdown、CSV、Word、Excel。
+- `run_vision_batch(records, ...)`、`run_vision_pipeline(out, ...)` 批量跑同一套流程。
+
+界面上是一个侧栏入口：首页、视频库、查看、设置。布局规则见 [docs/DESIGN.md](docs/DESIGN.md)，模型栈见 [docs/VISION.md](docs/VISION.md)。
 
 ## 摄像头（Windows，显式开启）
 

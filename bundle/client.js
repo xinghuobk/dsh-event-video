@@ -1557,7 +1557,7 @@ window.__ModuleLoader__.load({
         ['chapters', `章节 ${chapters.length}`],
         ['transcript', `台词 ${windowUnits.length}`],
         ['annotations', `标注 ${annotations.filter((item) => !item.resolved).length}/${annotations.length}`],
-        ['descriptions', `画面解读 ${(vision.descriptions || []).length}`],
+        ['descriptions', `画面描述 ${(vision.descriptions || []).length}`],
         ['flags', `待确认 ${reviewFlags.length}`],
       ]
       const openAnnotations = annotations.filter((item) => !item.resolved)
@@ -1632,7 +1632,7 @@ window.__ModuleLoader__.load({
             : null,
         ]
       const descriptionsPanel = (vision.descriptions || []).length === 0
-        ? h('div', { className: 'dsev-detail-empty' }, '还没有画面解读：展开「智能工具」后点「描述画面」')
+        ? h('div', { className: 'dsev-detail-empty' }, '还没有画面描述：展开「智能工具」后点「描述画面」')
         : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
           h('button', { type: 'button', className: 'dsev-time dsev-time-btn', onClick: () => seek(item.t0) }, fmt(item.t0)),
           h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))
@@ -2478,15 +2478,15 @@ window.__ModuleLoader__.load({
       const totalSeconds = records.reduce((sum, record) => sum + Number(record.duration || record.span || 0), 0)
       const recent = records.slice(0, 4)
       const steps = [
-        { icon: 'plus', title: '添加视频', text: '选择一个本机视频文件，支持屏幕录制和对话视频。' },
-        { icon: 'sparkle', title: '自动分析', text: '提取画面、台词和章节，整理成可浏览的时间线。' },
-        { icon: 'check', title: '处理待确认', text: '查看系统标出的疑点，写标注或导出成工单。' },
+        { icon: 'plus', title: '添加视频', text: '选一个本机视频，录屏和会议录像都可以。' },
+        { icon: 'sparkle', title: '自动分析', text: '拆出画面、台词和章节，整理成一条时间线。' },
+        { icon: 'check', title: '处理待确认', text: '看它标出的疑点，写标注或导出工单。' },
       ]
       return h('div', { className: 'dsev-home' },
         h('section', { className: 'dsev-home-hero' },
           h('div', { className: 'dsev-home-hero-text' },
-            h('h1', null, '把视频变成可核对的工作清单'),
-            h('p', null, '添加一个视频，自动提取画面、台词和章节；需要你确认的地方会单独列出来。')),
+            h('h1', null, '看视频，也把问题记下来'),
+            h('p', null, '放一个录屏或会议视频进来，它会拆出台词、章节和需要确认的地方。')),
           h('div', { className: 'dsev-home-actions' },
             h('button', { type: 'button', className: 'dsev-btn dsev-btn-primary', onClick: onAdd },
               h(Icon, { name: 'plus' }), '添加视频'),
@@ -2504,8 +2504,8 @@ window.__ModuleLoader__.load({
         dismissed ? null : h('section', { className: 'dsev-onboard' },
           h('div', { className: 'dsev-onboard-head' },
             h('div', null,
-              h('div', { className: 'dsev-onboard-title' }, '三步开始'),
-              h('div', { className: 'dsev-onboard-sub' }, '第一次用？照下面做即可。')),
+              h('div', { className: 'dsev-onboard-title' }, '第一次用，按这个顺序'),
+              h('div', { className: 'dsev-onboard-sub' }, '不用记流程，跟着做一遍就行。')),
             h('button', { type: 'button', className: 'dsev-btn', onClick: dismiss }, '知道了')),
           h('div', { className: 'dsev-onboard-steps' },
             steps.map((step, index) => h('div', { className: 'dsev-step', key: step.title },
@@ -2586,7 +2586,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsev-settings' },
         h('div', { className: 'dsev-settings-head' },
           h('h1', null, '设置'),
-          h('p', null, '启动方式、数据位置和已配置的能力。')),
+          h('p', null, '启动页、数据位置和识别能力。')),
         h('section', { className: 'dsev-settings-card' },
           h('div', { className: 'dsev-settings-title' }, '启动'),
           h('div', { className: 'dsev-settings-choice' },
@@ -2612,8 +2612,8 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'dsev-btn', onClick: () => openFolder('home') }, '打开数据目录'),
             h('button', { type: 'button', className: 'dsev-btn', onClick: () => openFolder('exports') }, '打开导出目录'))),
         h('section', { className: 'dsev-settings-card' },
-          h('div', { className: 'dsev-settings-title' }, '智能能力'),
-          h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '画面解读模型'), h('span', { className: 'dsev-settings-value' }, settings.ai.vlmModel || '—'), status(settings.ai.vlmConfigured)),
+          h('div', { className: 'dsev-settings-title' }, '识别能力'),
+          h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '画面描述模型'), h('span', { className: 'dsev-settings-value' }, settings.ai.vlmModel || '—'), status(settings.ai.vlmConfigured)),
           h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '关键帧思考模型'), h('span', { className: 'dsev-settings-value' }, settings.ai.vlmThinkModel || '—'), status(settings.ai.vlmConfigured)),
           h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '精确文字识别'), h('span', { className: 'dsev-settings-value' }, ''), status(settings.ai.ocrConfigured)),
           h('div', { className: 'dsev-settings-row' }, h('span', { className: 'dsev-settings-label' }, '元素定位'), h('span', { className: 'dsev-settings-value' }, ''), status(settings.ai.groundConfigured))),
