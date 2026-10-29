@@ -33,7 +33,7 @@ This note records what the plugin's review UI borrows from professional video-re
 | inline feedback | `note` state under player controls |
 | calm chrome | `.dsev-*` token overrides at the end of the client stylesheet |
 
-## Deliberate departures
+## Onboarding\n\nA first-run home page follows the NN/g guidance that users need to know what a tool contains and where to start: a one-line promise, three numbered steps (add → analyze → resolve), and a dismissible guide stored in `localStorage`. The primary CTA opens the build form directly instead of asking users to find it.\n\n## Deliberate departures
 
 - We keep a dark, compact layout rather than a pure media-player layout because the job is review plus export, not playback.
 - We keep the model/confidence text visible; a consumer video player would hide it, but a review tool must not.
