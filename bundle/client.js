@@ -405,8 +405,10 @@ window.__ModuleLoader__.load({
       .dsev-seek-labels { display: flex; justify-content: space-between; font-family: var(--dsev-mono); font-size: 10.5px; color: var(--dsev-text-3); }
 
       .dsev-review-columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; margin-top: 16px; align-items: start; }
-      .dsev-review-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 8px; align-self: start; }
-      .dsev-review-side .dsev-units { max-height: calc(100vh - 380px); overflow-y: auto; }
+      .dsev-review-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; align-items: start; }
+      .dsev-review-side { display: flex; flex-direction: column; gap: 16px; align-self: stretch; min-height: 0; }
+      .dsev-review-side > .dsev-card-box:last-child { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+      .dsev-review-side .dsev-units { flex: 1; overflow-y: auto; max-height: none; }
       .dsev-ch-att { font-size: 11px; color: var(--dsev-text-3); white-space: nowrap; }
       @media (max-width: 1080px) { .dsev-review-columns { grid-template-columns: minmax(0, 1fr); } }
       .dsev-now { border: 0.5px solid var(--dsev-border); border-radius: 14px; padding: 14px 16px; background: color-mix(in srgb, var(--dsev-surface) 92%, transparent); }
@@ -506,7 +508,7 @@ window.__ModuleLoader__.load({
       .dsev-btn { transition: transform 0.12s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease; }
       .dsev-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22); }
       .dsev-btn:active { transform: translateY(0) scale(0.98); }
-      .dsev-btn-primary { background: linear-gradient(135deg, #7c8cff, #6a5cff); box-shadow: 0 6px 18px rgba(124, 140, 255, 0.28); }
+      .dsev-btn-primary { color: #fff; background: linear-gradient(135deg, #7c8cff, #6a5cff); box-shadow: 0 6px 18px rgba(124, 140, 255, 0.28); }
       .dsev-btn-primary:hover { box-shadow: 0 12px 26px rgba(124, 140, 255, 0.4); }
       .dsev-btn:focus-visible, .dsev-input:focus-visible, .dsev-select:focus-visible, .dsev-record-select:focus-visible {
         outline: none; box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.32);
@@ -1321,24 +1323,25 @@ window.__ModuleLoader__.load({
               h('div', { className: 'dsev-progress-label' },
                 `${pipelineState.message || ''}${pipelineState.total ? `（${pipelineState.index || 0}/${pipelineState.total}）` : ''}`))
             : null,
-          h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
-            h('div', { className: 'dsev-card-title' }, `标注（${annotations.length}）`),
-            annotations.length === 0
-              ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
-              : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
-                h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
-                h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
-                h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))),
-          h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
-            h('div', { className: 'dsev-card-title' }, `VLM 画面描述（${(vision.descriptions || []).length}）`),
-            (vision.descriptions || []).length === 0
-              ? h('div', { className: 'dsev-detail-empty' }, '没有描述：配置 vlmEndpoint 后点「描述画面」')
-              : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
-                h('span', { className: 'dsev-time' }, fmt(item.t0)),
-                h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))),
-          h('div', { className: 'dsev-card-box', style: { marginTop: 16 } },
-            h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
-            chapterRows)),
+          h('div', { className: 'dsev-review-cards' },
+            h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, `标注（${annotations.length}）`),
+              annotations.length === 0
+                ? h('div', { className: 'dsev-detail-empty' }, '没有标注：播放到某一刻点「标注」')
+                : [...annotations].sort((a, b2) => a.t0 - b2.t0).map((annotation) => h('div', { className: 'dsev-sum-top', key: annotation.id },
+                  h('span', { className: 'dsev-time' }, fmt(annotation.t0)),
+                  h('span', { className: 'dsev-sum-top-title' }, `${annotation.kind === 'label' ? '[标签] ' : ''}${annotation.text} · ${annotation.author || ''}`),
+                  h('button', { type: 'button', className: 'dsev-btn', onClick: () => removeAnnotation(annotation.id) }, '删除')))),
+            h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, `VLM 画面描述（${(vision.descriptions || []).length}）`),
+              (vision.descriptions || []).length === 0
+                ? h('div', { className: 'dsev-detail-empty' }, '没有描述：配置 vlmEndpoint 后点「描述画面」')
+                : [...(vision.descriptions || [])].sort((a, b2) => a.t0 - b2.t0).map((item) => h('div', { className: 'dsev-sum-top', key: item.frame + item.t0 },
+                  h('span', { className: 'dsev-time' }, fmt(item.t0)),
+                  h('span', { className: 'dsev-sum-top-title', title: item.description }, item.description)))),
+            h('div', { className: 'dsev-card-box' },
+              h('div', { className: 'dsev-card-title' }, '章节（点击跳转）'),
+              chapterRows))),
         h('div', { className: 'dsev-review-side' },
           now,
           h('div', { className: 'dsev-card-box' },
